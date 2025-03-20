@@ -1,0 +1,74 @@
+{
+  "stations": {
+    "1": {
+      "nameEn": "Tram Station",
+      "nameTh": "สถานีรถราง",
+      "lat": 13.7949357,
+      "lng": 100.3188312,
+      "colors": ["Red", "Yellow", "Blue", "Green"]
+    },
+    "2": {
+      "nameEn": "Sport Building",
+      "nameTh": "อาคารอเนกประสงค์",
+      "lat": 13.7965390,
+      "lng": 100.3197911,
+      "colors": ["Green", "Red"]
+    },
+    "3": {
+      "nameEn": "Petanque Field",
+      "nameTh": "สนามเปตอง",
+      "lat": 13.7967803,
+      "lng": 100.3196564,
+      "colors": ["Red"]
+    },
+    "4": {
+      "nameEn": "Faculty of Veterinary Science",
+      "nameTh": "คณะสัตวแพทยศาสตร์",
+      "lat": 13.7981068,
+      "lng": 100.3181486,
+      "colors": ["Blue"]
+    },
+    "5": {
+      "nameEn": "College of Religious Studies",
+      "nameTh": "วิทยาลัยศาสนศึกษา",
+      "lat": 13.7984170,
+      "lng": 100.3182539,
+      "colors": ["Red"]
+    },
+    "6": {
+      "nameEn": "National Institute for Child (Line 3)",
+      "nameTh": "สถาบันฯเด็กและครอบครัว (สาย 3)",
+      "lat": 13.7987645,
+      "lng": 100.3190482,
+      "colors": ["Red"]
+    },
+    "7": {
+      "nameEn": "National Institute for Child (Line 2)",
+      "nameTh": "สถาบันฯเด็กและครอบครัว (สาย 2)",
+      "lat": 13.7988322,
+      "lng": 100.3191900,
+      "colors": ["Blue"]
+    },
+    "8": {
+      "nameEn": "Sports Field",
+      "nameTh": "สนามฟุตบอล",
+      "lat": 13.7978635,
+      "lng": 100.3202904,
+      "colors": ["Blue"]
+    },
+    "9": {
+      "nameEn": "Ramathibodi Dorm",
+      "nameTh": "หอพักมหาวิทยาลัยรามาธิบดี",
+      "lat": 13.7990891,
+      "lng": 100.3206927,
+      "colors": ["Red"]
+    },
+    "10": {
+      "nameEn": "Condominium",
+      "nameTh": "อาคารชุดพักอาศัย (คอนโด)",
+      "lat": 13.8002404,
+      "lng": 100.3203098,
+      "colors": ["Blue", "Red"]
+    }
+  }
+} 
