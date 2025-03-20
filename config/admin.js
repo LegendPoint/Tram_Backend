@@ -1,6 +1,10 @@
 import admin from 'firebase-admin';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import dotenv from 'dotenv';
+
+// Load environment variables
+dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -11,8 +15,9 @@ if (!admin.apps.length) {
     const serviceAccountPath = join(__dirname, '..', 'service-account.json');
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccountPath),
-      databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL
+      databaseURL: process.env.VITE_FIREBASE_DATABASE_URL
     });
+    console.log('Firebase Admin initialized successfully');
   } catch (error) {
     console.error('Error initializing admin SDK:', error);
   }
