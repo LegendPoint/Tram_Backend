@@ -5,8 +5,10 @@ const MapComponent = ({ origin, destination }) => {
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const markersRef = useRef([]);
+  const eventMarkersRef = useRef([]);
   const directionsRendererRef = useRef(null);
   const [stations, setStations] = useState([]);
+  const [events, setEvents] = useState([]);
   const [isMapLoaded, setIsMapLoaded] = useState(false);
 
   // Mahidol University coordinates
@@ -86,6 +88,13 @@ const MapComponent = ({ origin, destination }) => {
       });
       markersRef.current = [];
     }
+
+    if (eventMarkersRef.current) {
+      eventMarkersRef.current.forEach(marker => {
+        if (marker) marker.map = null;
+      });
+      eventMarkersRef.current = [];
+    }
     
     if (directionsRendererRef.current) {
       directionsRendererRef.current.setMap(null);
@@ -136,65 +145,170 @@ const MapComponent = ({ origin, destination }) => {
     return () => unsubscribe();
   }, [isMapLoaded, origin, destination]);
 
+  // Fetch and display events
+  useEffect(() => {
+    if (!isMapLoaded || !mapInstanceRef.current) return;
+
+    const database = getDatabase();
+    const eventsRef = ref(database, 'events');
+
+    const unsubscribe = onValue(eventsRef, async (snapshot) => {
+      try {
+        if (snapshot.exists()) {
+          const eventsData = Object.entries(snapshot.val()).map(([id, data]) => ({
+            id,
+            ...data
+          }));
+          setEvents(eventsData);
+
+          // Clear existing event markers
+          if (eventMarkersRef.current) {
+            eventMarkersRef.current.forEach(marker => {
+              if (marker) marker.map = null;
+            });
+          }
+          eventMarkersRef.current = [];
+
+          // Create markers for events
+          const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
+          eventsData.forEach(event => {
+            if (event.location) {
+              const markerView = new google.maps.marker.PinElement({
+                background: "#9C27B0", // Purple color for events
+                borderColor: "#ffffff",
+                glyphColor: "#ffffff",
+                scale: 1.2
+              });
+
+              const marker = new AdvancedMarkerElement({
+                map: mapInstanceRef.current,
+                position: { lat: event.location.lat, lng: event.location.lng },
+                title: event.name,
+                content: markerView.element
+              });
+
+              // Add click listener to show event details
+              marker.addListener('click', () => {
+                const infoWindow = new google.maps.InfoWindow({
+                  content: `
+                    <div style="padding: 10px;">
+                      <h3>${event.name}</h3>
+                      <p>${event.description}</p>
+                      <p>Start: ${new Date(event.startDate).toLocaleString()}</p>
+                      <p>End: ${new Date(event.endDate).toLocaleString()}</p>
+                    </div>
+                  `
+                });
+                infoWindow.open(mapInstanceRef.current, marker);
+              });
+
+              eventMarkersRef.current.push(marker);
+            }
+          });
+        }
+      } catch (error) {
+        console.error('Error loading events:', error);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [isMapLoaded]);
+
   // Handle route display
   useEffect(() => {
     if (!isMapLoaded || !mapInstanceRef.current) return;
 
-    if (origin && destination) {
-      cleanupMap();
-
-      const createMarker = async (station, isOrigin) => {
-        const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
-        
-        const markerView = new google.maps.marker.PinElement({
-          background: isOrigin ? "#4CAF50" : "#F44336",
-          borderColor: "#ffffff",
-          glyphColor: "#ffffff",
-          scale: 1.2
-        });
-
-        const marker = new AdvancedMarkerElement({
-          map: mapInstanceRef.current,
-          position: { lat: station.lat, lng: station.lng },
-          title: station.nameEn,
-          content: markerView.element
-        });
-
-        markersRef.current.push(marker);
-      };
-
-      createMarker(origin, true);
-      createMarker(destination, false);
-
-      directionsRendererRef.current = new window.google.maps.DirectionsRenderer({
+    const displayRoute = async (start, end, isFirstLeg = false) => {
+      const directionsService = new window.google.maps.DirectionsService();
+      const directionsRenderer = new window.google.maps.DirectionsRenderer({
         map: mapInstanceRef.current,
         suppressMarkers: true,
         polylineOptions: {
-          strokeColor: '#2196F3',
+          strokeColor: isFirstLeg ? '#4CAF50' : '#2196F3',
           strokeWeight: 4
         }
       });
 
-      const directionsService = new window.google.maps.DirectionsService();
       directionsService.route(
         {
-          origin: { lat: origin.lat, lng: origin.lng },
-          destination: { lat: destination.lat, lng: destination.lng },
-          travelMode: window.google.maps.TravelMode.DRIVING,
+          origin: { lat: start.lat, lng: start.lng },
+          destination: { lat: end.lat, lng: end.lng },
+          travelMode: window.google.maps.TravelMode.WALKING,
         },
         (result, status) => {
-          if (status === 'OK' && directionsRendererRef.current) {
-            directionsRendererRef.current.setDirections(result);
-            
-            const bounds = new window.google.maps.LatLngBounds();
-            bounds.extend({ lat: origin.lat, lng: origin.lng });
-            bounds.extend({ lat: destination.lat, lng: destination.lng });
-            mapInstanceRef.current.fitBounds(bounds);
-            const padding = { top: 50, right: 50, bottom: 50, left: 50 };
-            mapInstanceRef.current.fitBounds(bounds, padding);
+          if (status === 'OK') {
+            directionsRenderer.setDirections(result);
+            directionsRendererRef.current = directionsRenderer;
           }
         }
       );
+    };
+
+    const createMarker = async (location, type) => {
+      const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
+      
+      let markerView;
+      if (type === 'current') {
+        markerView = new google.maps.marker.PinElement({
+          background: "#FF9800",
+          borderColor: "#ffffff",
+          glyphColor: "#ffffff",
+          scale: 1.2
+        });
+      } else if (type === 'nearest') {
+        markerView = new google.maps.marker.PinElement({
+          background: "#4CAF50",
+          borderColor: "#ffffff",
+          glyphColor: "#ffffff",
+          scale: 1.2
+        });
+      } else {
+        markerView = new google.maps.marker.PinElement({
+          background: "#F44336",
+          borderColor: "#ffffff",
+          glyphColor: "#ffffff",
+          scale: 1.2
+        });
+      }
+
+      const marker = new AdvancedMarkerElement({
+        map: mapInstanceRef.current,
+        position: { lat: location.lat, lng: location.lng },
+        title: location.nameEn,
+        content: markerView.element
+      });
+
+      markersRef.current.push(marker);
+    };
+
+    if (origin && destination) {
+      cleanupMap();
+
+      // If origin includes current location and nearest station
+      if (origin.currentLocation && origin.nearestStation) {
+        // Create markers
+        createMarker(origin.currentLocation, 'current');
+        createMarker(origin.nearestStation, 'nearest');
+        createMarker(destination, 'destination');
+
+        // Display routes
+        displayRoute(origin.currentLocation, origin.nearestStation, true);
+        displayRoute(origin.nearestStation, destination);
+
+        // Fit bounds to show all points
+        const bounds = new window.google.maps.LatLngBounds();
+        bounds.extend({ lat: origin.currentLocation.lat, lng: origin.currentLocation.lng });
+        bounds.extend({ lat: origin.nearestStation.lat, lng: origin.nearestStation.lng });
+        bounds.extend({ lat: destination.lat, lng: destination.lng });
+        mapInstanceRef.current.fitBounds(bounds);
+        const padding = { top: 50, right: 50, bottom: 50, left: 50 };
+        mapInstanceRef.current.fitBounds(bounds, padding);
+      } else {
+        // Regular station-to-station route
+        createMarker(origin.station, 'nearest');
+        createMarker(destination, 'destination');
+        displayRoute(origin.station, destination);
+      }
     }
   }, [origin, destination, isMapLoaded]);
 

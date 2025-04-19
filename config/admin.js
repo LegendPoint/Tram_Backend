@@ -1,35 +1,14 @@
-import admin from 'firebase-admin';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
-import dotenv from 'dotenv';
+import { getDatabase, ref, remove, update, set } from 'firebase/database';
+import { getAuth } from 'firebase/auth';
 
-// Load environment variables
-dotenv.config();
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-// Initialize Firebase Admin SDK
-if (!admin.apps.length) {
-  try {
-    const serviceAccountPath = join(__dirname, '..', 'service-account.json');
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccountPath),
-      databaseURL: process.env.VITE_FIREBASE_DATABASE_URL
-    });
-    console.log('Firebase Admin initialized successfully');
-  } catch (error) {
-    console.error('Error initializing admin SDK:', error);
-  }
-}
-
-const adminDb = admin.database();
+// Get the database instance
+const db = getDatabase();
 
 // Admin functions for station management
 export const deleteStation = async (stationId) => {
   try {
-    const stationRef = adminDb.ref(`stations/${stationId}`);
-    await stationRef.remove();
+    const stationRef = ref(db, `stations/${stationId}`);
+    await remove(stationRef);
     return true;
   } catch (error) {
     console.error('Error deleting station:', error);
@@ -39,8 +18,8 @@ export const deleteStation = async (stationId) => {
 
 export const updateStation = async (stationId, stationData) => {
   try {
-    const stationRef = adminDb.ref(`stations/${stationId}`);
-    await stationRef.update(stationData);
+    const stationRef = ref(db, `stations/${stationId}`);
+    await update(stationRef, stationData);
     return true;
   } catch (error) {
     console.error('Error updating station:', error);
@@ -50,8 +29,8 @@ export const updateStation = async (stationId, stationData) => {
 
 export const importStations = async (stations) => {
   try {
-    const stationsRef = adminDb.ref('stations');
-    await stationsRef.set(stations);
+    const stationsRef = ref(db, 'stations');
+    await set(stationsRef, stations);
     return true;
   } catch (error) {
     console.error('Error importing stations:', error);
@@ -59,15 +38,16 @@ export const importStations = async (stations) => {
   }
 };
 
+// Function to verify admin status
 export const verifyAdminToken = async (idToken) => {
   try {
-    const decodedToken = await admin.auth().verifyIdToken(idToken);
-    return decodedToken;
+    const user = await getAuth().currentUser;
+    if (!user) return false;
+    
+    const tokenResult = await user.getIdTokenResult();
+    return tokenResult.claims.admin === true;
   } catch (error) {
     console.error('Error verifying admin token:', error);
-    throw error;
+    return false;
   }
-};
-
-export { adminDb };
-export default admin; 
+}; 

@@ -261,3 +261,13 @@ button:disabled {
   color: white;
   font-size: 0.9rem;
 }
+
+.nearest-station-info {
+  margin-top: 10px;
+  padding: 8px;
+  background-color: #e8f5e9;
+  border-radius: 4px;
+  color: #2e7d32;
+  font-size: 14px;
+  text-align: center;
+}
