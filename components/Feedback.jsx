@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { getDatabase, ref, onValue, remove } from 'firebase/database';
 import { useNavigate } from 'react-router-dom';
+import { useUserAuth } from '../context/UserAuthContext'; // Add this import
 import './Feedback.css';
 
 const Feedback = () => {
   const [feedbacks, setFeedbacks] = useState([]);
   const navigate = useNavigate();
+  const { user } = useUserAuth(); // Add this line
 
   useEffect(() => {
     const db = getDatabase();
@@ -23,6 +25,18 @@ const Feedback = () => {
       }
     });
   }, []);
+
+  // Add authentication check at start
+  if (!user) {
+    return (
+      <div className="feedback-page">
+        <p>Please log in to access feedback management.</p>
+        <button className="back-btn" onClick={() => navigate('/')}>
+          Go to Home
+        </button>
+      </div>
+    );
+  }
 
   const handleDelete = async (id) => {
     const db = getDatabase();

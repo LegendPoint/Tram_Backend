@@ -2,6 +2,15 @@
   padding: 2rem;
   max-width: 1200px;
   margin: 0 auto;
+  min-height: 100vh;
+}
+
+/* Enhanced unauthenticated view styling */
+.admin-dashboard > p {
+  text-align: center;
+  margin: 2rem 0;
+  font-size: 1.2rem;
+  color: #333;
 }
 
 .back-button {
@@ -11,10 +20,11 @@
   border: none;
   border-radius: 4px;
   cursor: pointer;
-  margin-bottom: 20px;
-  width: 100%;
+  margin: 20px auto;
   font-size: 1rem;
   transition: background-color 0.3s ease;
+  display: block;
+  width: fit-content;
 }
 
 .back-button:hover {
@@ -44,6 +54,7 @@
   display: flex;
   justify-content: center;
   margin-bottom: 2rem;
+  gap: 1rem;
 }
 
 .add-event-button {
@@ -145,7 +156,6 @@
   font-size: 1.1rem;
   font-weight: 500;
   cursor: pointer;
-  margin-left: 1rem;
   transition: all 0.3s ease;
 }
 
@@ -166,10 +176,31 @@
   }
 
   .event-controls {
+    flex-direction: column;
     margin-bottom: 1rem;
   }
 
-  .add-event-button {
+  .add-event-button,
+  .feedback-button {
     width: 100%;
+    margin-left: 0;
+    margin-top: 0.5rem;
   }
-} 
+
+  .back-button {
+    margin: 10px auto;
+  }
+}
+
+/* New unauthenticated-specific styles */
+.admin-dashboard > div:not(.modal-overlay) {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 50vh;
+}
+
+.admin-dashboard > div > p {
+  margin-bottom: 2rem;
+}

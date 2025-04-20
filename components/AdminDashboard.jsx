@@ -51,7 +51,17 @@ const AdminDashboard = () => {
   };
 
   if (!user) {
-    return <div className="admin-dashboard">Please log in to access the admin dashboard.</div>;
+    return (
+      <div className="admin-dashboard">
+        <p>Please log in to access the admin dashboard.</p>
+        <button 
+          className="back-button"
+          onClick={() => navigate('/')}
+        >
+          Back to Home
+        </button>
+      </div>
+    );
   }
 
   return (
