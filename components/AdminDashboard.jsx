@@ -76,6 +76,13 @@ const AdminDashboard = () => {
         >
           Add New Event
         </button>
+
+        <button 
+          className="feedback-button"
+          onClick={() => navigate('/feedback')}
+        >
+          View Feedback
+        </button>
       </div>
 
       {showAddEvent && (
@@ -107,4 +114,4 @@ const AdminDashboard = () => {
   );
 };
 
-export default AdminDashboard; 
+export default AdminDashboard;

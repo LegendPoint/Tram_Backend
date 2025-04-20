@@ -1,6 +1,7 @@
 import { getDatabase, ref, remove, update, set } from 'firebase/database';
 import { getAuth } from 'firebase/auth';
 
+
 // Get the database instance
 const db = getDatabase();
 

@@ -1,11 +1,16 @@
 .add-event-container {
-  max-width: 800px;
+  width:100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  max-width: 600px;         /* Smaller than original 800px */
   margin: 2rem auto;
-  padding: 2rem;
+  padding: 1.5rem;          /* Slightly smaller padding too */
   background: white;
   border-radius: 8px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
+
+
 
 .add-event-container h2 {
   margin-bottom: 1.5rem;

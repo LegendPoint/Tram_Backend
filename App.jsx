@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useUserAuth } from './context/UserAuthContext'
 import MapComponent from './components/MapComponent'
 import StationSelector from './components/StationSelector'
+import { getDatabase, ref, push } from 'firebase/database'
 import './App.css'
 
 function App() {
@@ -10,8 +11,10 @@ function App() {
   const navigate = useNavigate();
   const [selectedOrigin, setSelectedOrigin] = useState(null);
   const [selectedDestination, setSelectedDestination] = useState(null);
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [feedbackMessage, setFeedbackMessage] = useState('');
+  const [feedbackEmail, setFeedbackEmail] = useState('');
 
-  // Debug logging
   useEffect(() => {
     console.log('App: Current user state:', user ? 'Logged in' : 'Not logged in');
   }, [user]);
@@ -34,15 +37,36 @@ function App() {
     navigate('/dashboard');
   };
 
-  // Debug function for station selection
   const handleOriginSelect = (station) => {
-    console.log('Origin station selected:', station);
     setSelectedOrigin(station);
   };
 
   const handleDestinationSelect = (station) => {
-    console.log('Destination station selected:', station);
     setSelectedDestination(station);
+  };
+
+  const handleFeedbackSubmit = async () => {
+    if (!feedbackMessage.trim()) {
+      alert('Please enter your message.');
+      return;
+    }
+
+    try {
+      const db = getDatabase();
+      const feedbackRef = ref(db, 'feedback');
+      await push(feedbackRef, {
+        email: feedbackEmail || 'Anonymous',
+        message: feedbackMessage,
+        timestamp: new Date().toISOString()
+      });
+      setFeedbackMessage('');
+      setFeedbackEmail('');
+      setShowFeedback(false);
+      alert('Thank you for your feedback!');
+    } catch (error) {
+      console.error('Error submitting feedback:', error);
+      alert('Failed to submit feedback.');
+    }
   };
 
   return (
@@ -86,7 +110,33 @@ function App() {
             >
               Access Admin Dashboard
             </button>
+            <button 
+              className="feedback-button"
+              onClick={() => setShowFeedback(true)}
+            >
+              Give Feedback
+            </button>
           </div>
+
+          {showFeedback && (
+            <div className="feedback-popup">
+              <input
+                type="email"
+                placeholder="Your email (optional)"
+                value={feedbackEmail}
+                onChange={(e) => setFeedbackEmail(e.target.value)}
+              />
+              <textarea 
+                placeholder="Enter your feedback here..." 
+                value={feedbackMessage}
+                onChange={(e) => setFeedbackMessage(e.target.value)}
+              />
+              <div className="feedback-actions">
+                <button className="confirm-btn" onClick={handleFeedbackSubmit}>Submit</button>
+                <button className="cancel-btn" onClick={() => setShowFeedback(false)}>Cancel</button>
+              </div>
+            </div>
+          )}
         </div>
       </main>
     </div>

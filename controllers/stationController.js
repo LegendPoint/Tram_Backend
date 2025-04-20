@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { adminDb } from '../config/admin.js';
+import { adminDb } from '../config/adminserver.js';
 import { readFileSync } from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
