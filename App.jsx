@@ -14,6 +14,11 @@ function App() {
   const [showFeedback, setShowFeedback] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState('');
   const [feedbackEmail, setFeedbackEmail] = useState('');
+  const [routeInfo, setRouteInfo] = useState({
+    walking: { distance: '', duration: '' },
+    driving: { distance: '', duration: '' },
+    total: { distance: '', duration: '' }
+  });
 
   useEffect(() => {
     console.log('App: Current user state:', user ? 'Logged in' : 'Not logged in');
@@ -69,6 +74,81 @@ function App() {
     }
   };
 
+  // Function to convert distance string to kilometers
+  const convertToKm = (distanceStr) => {
+    if (!distanceStr) return 0;
+    // Match both English and Thai units (km, กม, m, ม)
+    const match = distanceStr.match(/(\d+\.?\d*)\s*(km|กม|m|ม)/);
+    if (!match) return 0;
+    const value = parseFloat(match[1]);
+    const unit = match[2];
+    // Convert to km if the unit is meters (m or ม)
+    return (unit === 'm' || unit === 'ม') ? value / 1000 : value;
+  };
+
+  // Function to convert duration string to minutes
+  const convertToMinutes = (durationStr) => {
+    if (!durationStr) return 0;
+    // Match both English and Thai time units
+    const match = durationStr.match(/(?:(\d+)\s*(?:hour|hr|ชั่วโมง)(?:s)?)?\s*(?:(\d+)\s*(?:min|minute|นาที)(?:s)?)?/);
+    if (!match) return 0;
+    const hours = match[1] ? parseInt(match[1]) : 0;
+    const minutes = match[2] ? parseInt(match[2]) : 0;
+    return hours * 60 + minutes;
+  };
+
+  // Function to format duration display
+  const formatDuration = (durationStr) => {
+    if (!durationStr) return '';
+    const totalMinutes = convertToMinutes(durationStr);
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    
+    if (hours === 0) {
+      return `${minutes} min`;
+    } else if (minutes === 0) {
+      return `${hours} hr`;
+    } else {
+      return `${hours} hr ${minutes} min`;
+    }
+  };
+
+  // Function to format total distance
+  const formatTotalDistance = (walkingDist, drivingDist) => {
+    if (selectedOrigin?.currentLocation) {
+      const totalKm = convertToKm(walkingDist) + convertToKm(drivingDist);
+      return `${totalKm.toFixed(1)} km`;
+    } else {
+      return formatDistance(drivingDist);
+    }
+  };
+
+  // Function to format total duration
+  const formatTotalDuration = (walkingDur, drivingDur) => {
+    if (selectedOrigin?.currentLocation) {
+      const totalMinutes = convertToMinutes(walkingDur) + convertToMinutes(drivingDur);
+      const hours = Math.floor(totalMinutes / 60);
+      const minutes = totalMinutes % 60;
+      
+      if (hours === 0) {
+        return `${minutes} min`;
+      } else if (minutes === 0) {
+        return `${hours} hr`;
+      } else {
+        return `${hours} hr ${minutes} min`;
+      }
+    } else {
+      return formatDuration(drivingDur);
+    }
+  };
+
+  // Function to standardize distance display
+  const formatDistance = (distanceStr) => {
+    if (!distanceStr) return '';
+    const km = convertToKm(distanceStr);
+    return `${km.toFixed(1)} km`;
+  };
+
   return (
     <div className="App">
       <header className="App-header">
@@ -99,6 +179,7 @@ function App() {
               <MapComponent 
                 origin={selectedOrigin}
                 destination={selectedDestination}
+                onRouteInfoUpdate={setRouteInfo}
               />
             </div>
           </div>
@@ -117,6 +198,36 @@ function App() {
               Give Feedback
             </button>
           </div>
+
+          {(routeInfo.walking.distance || routeInfo.driving.distance) && (
+            <div className="route-info-container">
+              {selectedOrigin?.currentLocation && routeInfo.walking.distance && (
+                <div className="route-info-section">
+                  <h3>Walking to {selectedOrigin.nearestStation.nameEn}</h3>
+                  <p>Distance: {formatDistance(routeInfo.walking.distance)}</p>
+                  <p>Duration: {formatDuration(routeInfo.walking.duration)}</p>
+                </div>
+              )}
+              {routeInfo.driving.distance && (
+                <div className="route-info-section">
+                  <h3>
+                    {selectedOrigin?.currentLocation 
+                      ? `${selectedOrigin.nearestStation.nameEn} to ${selectedDestination.nameEn}`
+                      : `${selectedOrigin.station.nameEn} to ${selectedDestination.nameEn}`}
+                  </h3>
+                  <p>Distance: {formatDistance(routeInfo.driving.distance)}</p>
+                  <p>Duration: {formatDuration(routeInfo.driving.duration)}</p>
+                </div>
+              )}
+              {routeInfo.total.distance && (
+                <div className="route-info-section total">
+                  <h3>Total Journey</h3>
+                  <p>Total Distance: {formatTotalDistance(routeInfo.walking.distance, routeInfo.driving.distance)}</p>
+                  <p>Total Duration: {formatTotalDuration(routeInfo.walking.duration, routeInfo.driving.duration)}</p>
+                </div>
+              )}
+            </div>
+          )}
 
           {showFeedback && (
             <div className="feedback-popup">

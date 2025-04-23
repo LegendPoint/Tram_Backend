@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { getDatabase, ref, onValue } from 'firebase/database';
 
-const MapComponent = ({ origin, destination }) => {
+const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const markersRef = useRef([]);
@@ -193,11 +193,13 @@ const MapComponent = ({ origin, destination }) => {
       {
         origin: { lat: start.lat, lng: start.lng },
         destination: { lat: end.lat, lng: end.lng },
-        travelMode: window.google.maps.TravelMode.DRIVING,
+        travelMode: isFirstLeg ? window.google.maps.TravelMode.WALKING : window.google.maps.TravelMode.DRIVING,
       },
       (result, status) => {
         if (status === 'OK') {
           const path = result.routes[0].overview_path;
+          const distance = result.routes[0].legs[0].distance.text;
+          const duration = result.routes[0].legs[0].duration.text;
 
           const lineSymbol = {
             path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
@@ -219,6 +221,23 @@ const MapComponent = ({ origin, destination }) => {
           });
 
           polylinesRef.current.push(polyline);
+
+          // Update route information through callback
+          if (isFirstLeg) {
+            onRouteInfoUpdate(prev => ({
+              ...prev,
+              walking: { distance, duration }
+            }));
+          } else {
+            onRouteInfoUpdate(prev => ({
+              ...prev,
+              driving: { distance, duration },
+              total: {
+                distance: `${prev.walking.distance} + ${distance}`,
+                duration: `${prev.walking.duration} + ${duration}`
+              }
+            }));
+          }
         }
       }
     );
@@ -289,19 +308,19 @@ const MapComponent = ({ origin, destination }) => {
   }, [origin, destination, isMapLoaded]);
 
   return (
-    <div 
-      ref={mapRef} 
-      style={{ 
-        width: '100%',
-        height: '100%',
-        minHeight: '600px',
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        borderRadius: '8px',
-        overflow: 'hidden'
-      }} 
-    />
+    <div className="map-section">
+      <div 
+        ref={mapRef} 
+        style={{ 
+          width: '100%',
+          height: '100%',
+          minHeight: '600px',
+          position: 'relative',
+          borderRadius: '8px',
+          overflow: 'hidden'
+        }} 
+      />
+    </div>
   );
 };
 

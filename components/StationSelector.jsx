@@ -72,6 +72,9 @@ const StationSelector = ({ onOriginSelect, onDestinationSelect }) => {
     if (selectedId === 'current') {
       getCurrentLocation();
     } else {
+      // Clear current location and nearest station when selecting a different origin
+      setCurrentLocation(null);
+      setNearestStation(null);
       const station = stations.find(s => s.id === selectedId);
       console.log('Selected origin station:', station);
       onOriginSelect({ station });
@@ -131,7 +134,7 @@ const StationSelector = ({ onOriginSelect, onDestinationSelect }) => {
         </div>
       )}
 
-      {nearestStation && (
+      {currentLocation && nearestStation && (
         <div className="nearest-station-info">
           Nearest tram stop: {nearestStation.nameEn} ({nearestStation.nameTh})
         </div>

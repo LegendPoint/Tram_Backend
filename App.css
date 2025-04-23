@@ -142,6 +142,9 @@ button:disabled {
   overflow: hidden;
   position: relative;
   margin-bottom: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
 }
 
 .map-container {
@@ -269,8 +272,6 @@ button:disabled {
   color: white;
 }
 
-
-
 /* Responsive Design */
 @media (max-width: 768px) {
   .selector-container {
@@ -344,4 +345,44 @@ button:disabled {
   color: #2e7d32;
   font-size: 14px;
   text-align: center;
+}
+
+.route-info-container {
+  background-color: #f8f9fa;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  justify-content: space-between;
+}
+
+.route-info-section {
+  flex: 1;
+  min-width: 200px;
+  padding: 15px;
+  background-color: white;
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.route-info-section h3 {
+  margin: 0 0 10px 0;
+  color: #333;
+  font-size: 1.1em;
+}
+
+.route-info-section p {
+  margin: 5px 0;
+  color: #666;
+}
+
+.route-info-section.total {
+  background-color: #e3f2fd;
+  border-left: 4px solid #2196F3;
+}
+
+.route-info-section.total h3 {
+  color: #1976D2;
 }
