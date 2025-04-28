@@ -328,12 +328,30 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
         ];
       }
 
-      // Add the destination point to the route if it's not already included
-      const finalRoute = [...routePortion];
-      const lastPoint = finalRoute[finalRoute.length - 1];
+      // Add the destination point to the route if it's not already included (for non-Blue routes)
+      const lastPoint = routePortion[routePortion.length - 1];
       const destinationPoint = { lat: endStation.lat, lng: endStation.lng };
-      if (lastPoint.lat !== destinationPoint.lat || lastPoint.lng !== destinationPoint.lng) {
-        finalRoute.push(destinationPoint);
+      let finalRoute = [...routePortion];
+      
+      if (selectedColor === 'Blue') {
+        const threshold = 0.05; // 30 meters in km
+        let stopIdx = -1;
+        for (let idx = 0; idx < finalRoute.length; idx++) {
+          const point = finalRoute[idx];
+          const dist = calculateDistance(point.lat, point.lng, endStation.lat, endStation.lng);
+          if (dist <= threshold) {
+            stopIdx = idx;
+            break; // Stop at the first point within 30 meters
+          }
+        }
+        if (stopIdx !== -1) {
+          finalRoute = finalRoute.slice(0, stopIdx + 1);
+        }
+        // Do not append the destination point for Blue route
+      } else {
+        if (lastPoint.lat !== destinationPoint.lat || lastPoint.lng !== destinationPoint.lng) {
+          finalRoute.push(destinationPoint);
+        }
       }
 
       // Create polyline with the selected portion of the route
