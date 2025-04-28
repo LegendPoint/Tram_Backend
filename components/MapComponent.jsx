@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { getDatabase, ref, onValue } from 'firebase/database';
+import { getDatabase, ref, onValue, get } from 'firebase/database';
 
 const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
   const mapRef = useRef(null);
@@ -10,6 +10,7 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
   const [stations, setStations] = useState([]);
   const [events, setEvents] = useState([]);
   const [isMapLoaded, setIsMapLoaded] = useState(false);
+  const [routeColor, setRouteColor] = useState(null);
 
   const mahidolCenter = { lat: 13.7949357, lng: 100.3188312 };
   const defaultZoom = 15;
@@ -76,6 +77,33 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
   }, []);
 
   const cleanupMap = () => {
+    // Clean up all polylines
+    polylinesRef.current.forEach(polyline => {
+      if (polyline && polyline.setMap) {
+        polyline.setMap(null);
+      }
+    });
+    polylinesRef.current = [];
+
+    // Clean up all markers
+    markersRef.current.forEach(marker => {
+      if (marker && marker.setMap) {
+        marker.setMap(null);
+      }
+    });
+    markersRef.current = [];
+
+    // Clean up all event markers
+    eventMarkersRef.current.forEach(marker => {
+      if (marker && marker.setMap) {
+        marker.setMap(null);
+      }
+    });
+    eventMarkersRef.current = [];
+  };
+
+  const cleanupAll = () => {
+    // Clean up everything including markers
     markersRef.current.forEach(marker => marker.setMap(null));
     markersRef.current = [];
 
@@ -185,62 +213,306 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
     return () => unsubscribe();
   }, [isMapLoaded]);
 
-  // 🔁 REPLACED displayRoute with arrow-enhanced polyline
-  const displayRoute = async (start, end, isFirstLeg = false) => {
-    const directionsService = new window.google.maps.DirectionsService();
+  const displayRoute = async (startStation, endStation) => {
+    try {
+      if (!startStation || !endStation) {
+        console.error('Start or end station is undefined');
+        return;
+      }
 
-    directionsService.route(
-      {
-        origin: { lat: start.lat, lng: start.lng },
-        destination: { lat: end.lat, lng: end.lng },
-        travelMode: isFirstLeg ? window.google.maps.TravelMode.WALKING : window.google.maps.TravelMode.DRIVING,
-      },
-      (result, status) => {
-        if (status === 'OK') {
-          const path = result.routes[0].overview_path;
-          const distance = result.routes[0].legs[0].distance.text;
-          const duration = result.routes[0].legs[0].duration.text;
+      // Check if origin and destination are the same
+      if (startStation.id === endStation.id) {
+        alert('Origin and destination cannot be the same. Please select different locations.');
+        return;
+      }
 
-          const lineSymbol = {
-            path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
-            scale: 4,
-            strokeColor: isFirstLeg ? '#4CAF50' : '#2196F3',
-          };
+      // Use colors directly from the selected stations
+      const startColors = startStation.colors || [];
+      const endColors = endStation.colors || [];
 
-          const polyline = new google.maps.Polyline({
-            path,
-            icons: [{
-              icon: lineSymbol,
-              offset: '20%',
-              repeat: '150px'
-            }],
-            strokeColor: isFirstLeg ? '#4CAF50' : '#2196F3',
-            strokeOpacity: 0.8,
-            strokeWeight: 4,
-            map: mapInstanceRef.current
-          });
+      console.log('Start station colors:', startColors);
+      console.log('End station colors:', endColors);
 
-          polylinesRef.current.push(polyline);
+      // Find common colors between stations
+      const commonColors = startColors.filter(color => endColors.includes(color));
+      console.log('Common colors:', commonColors);
 
-          // Update route information through callback
-          if (isFirstLeg) {
-            onRouteInfoUpdate(prev => ({
-              ...prev,
-              walking: { distance, duration }
-            }));
-          } else {
-            onRouteInfoUpdate(prev => ({
-              ...prev,
-              driving: { distance, duration },
-              total: {
-                distance: `${prev.walking.distance} + ${distance}`,
-                duration: `${prev.walking.duration} + ${duration}`
-              }
-            }));
-          }
+      if (commonColors.length === 0) {
+        alert('No common route exists between these stations');
+        return;
+      }
+
+      // Get available routes from the database
+      const db = getDatabase();
+      const routesRef = ref(db, 'Routes');
+      const adminRoutesRef = ref(db, 'adminRoutes');
+      const [routesSnapshot, adminRoutesSnapshot] = await Promise.all([
+        get(routesRef),
+        get(adminRoutesRef)
+      ]);
+      
+      const availableRoutes = routesSnapshot.val() || {};
+      const adminRoutes = adminRoutesSnapshot.val() || {};
+
+      console.log('Available routes:', availableRoutes);
+      console.log('Admin routes:', adminRoutes);
+
+      // Filter common colors to only include those with valid routes
+      const validColors = commonColors.filter(color => 
+        availableRoutes[color] && Array.isArray(availableRoutes[color]) && availableRoutes[color].length > 0 &&
+        adminRoutes[color] && Array.isArray(adminRoutes[color]) && adminRoutes[color].length > 0
+      );
+
+      console.log('Valid colors:', validColors);
+
+      if (validColors.length === 0) {
+        alert('No valid routes found between these stations');
+        return;
+      }
+
+      // Calculate duration for each valid color
+      const colorDurations = {};
+      for (const color of validColors) {
+        const route = availableRoutes[color];
+        const startIndex = route.indexOf(startStation.id);
+        const endIndex = route.indexOf(endStation.id);
+        
+        if (startIndex !== -1 && endIndex !== -1) {
+          const distance = Math.abs(endIndex - startIndex);
+          colorDurations[color] = distance;
         }
       }
-    );
+
+      console.log('Color durations:', colorDurations);
+
+      if (Object.keys(colorDurations).length === 0) {
+        alert('Could not find a valid path between these stations');
+        return;
+      }
+
+      // Select the color with the shortest duration
+      const selectedColor = Object.entries(colorDurations)
+        .sort(([, a], [, b]) => a - b)[0][0];
+
+      console.log('Selected route color:', selectedColor);
+      setRouteColor(selectedColor);
+
+      // Get the detailed route points from adminRoutes
+      const detailedRoute = adminRoutes[selectedColor];
+      if (!detailedRoute || !Array.isArray(detailedRoute) || detailedRoute.length === 0) {
+        console.error('No detailed route points found for selected color');
+        return;
+      }
+
+      // Find the closest point in the detailed route to each station
+      function findClosestPointIndex(points, target) {
+        let minDist = Infinity, idx = 0;
+        points.forEach((p, i) => {
+          const d = Math.hypot(p.lat - target.lat, p.lng - target.lng);
+          if (d < minDist) { minDist = d; idx = i; }
+        });
+        return idx;
+      }
+      const startIdx = findClosestPointIndex(detailedRoute, startStation);
+      const endIdx = findClosestPointIndex(detailedRoute, endStation);
+
+      // Extract the segment, handling wrap-around for loops
+      let routePortion;
+      if (startIdx <= endIdx) {
+        routePortion = detailedRoute.slice(startIdx, endIdx + 1);
+      } else {
+        // If the route is a loop and end is before start, wrap around
+        routePortion = [
+          ...detailedRoute.slice(startIdx),
+          ...detailedRoute.slice(0, endIdx + 1)
+        ];
+      }
+
+      // Add the destination point to the route if it's not already included
+      const finalRoute = [...routePortion];
+      const lastPoint = finalRoute[finalRoute.length - 1];
+      const destinationPoint = { lat: endStation.lat, lng: endStation.lng };
+      if (lastPoint.lat !== destinationPoint.lat || lastPoint.lng !== destinationPoint.lng) {
+        finalRoute.push(destinationPoint);
+      }
+
+      // Create polyline with the selected portion of the route
+      const routeColors = {
+        'Red': '#F44336',
+        'Blue': '#2196F3',
+        'Green': '#4CAF50',
+        'Yellow': '#FFEB3B'
+      };
+
+      const polyline = new google.maps.Polyline({
+        path: finalRoute,
+        icons: [{
+          icon: {
+            path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+            scale: 4,
+            strokeColor: routeColors[selectedColor] || '#2196F3'
+          },
+          offset: '20%',
+          repeat: '150px'
+        }],
+        strokeColor: routeColors[selectedColor] || '#2196F3',
+        strokeOpacity: 0.8,
+        strokeWeight: 4,
+        map: mapInstanceRef.current
+      });
+
+      polylinesRef.current.push(polyline);
+
+      // Calculate distance and duration based on the route portion
+      const distance = calculateRouteDistance(finalRoute);
+      const duration = calculateRouteDuration(distance);
+      
+      onRouteInfoUpdate(prev => ({
+        ...prev,
+        driving: { distance, duration },
+        total: {
+          distance: `${prev.walking.distance} + ${distance}`,
+          duration: `${prev.walking.duration} + ${duration}`
+        }
+      }));
+
+      // Check if the selected destination is near the route
+      const isDestinationNearRoute = isPointNearRoute(finalRoute, endStation);
+      if (!isDestinationNearRoute) {
+        alert('Warning: The selected destination is not near the tram route. Please select a destination closer to the route.');
+      }
+    } catch (error) {
+      console.error('Error fetching route information:', error);
+      alert('Error loading route information. Please try again.');
+    }
+  };
+
+  const findClosestPointIndex = (path, location) => {
+    let minDistance = Infinity;
+    let closestIndex = 0;
+    
+    for (let i = 0; i < path.length; i++) {
+      const distance = calculateDistance(
+        location.lat,
+        location.lng,
+        path[i].lat,
+        path[i].lng
+      );
+      
+      if (distance < minDistance) {
+        minDistance = distance;
+        closestIndex = i;
+      }
+    }
+    
+    return closestIndex;
+  };
+
+  const findClosestPointOnRoute = (path, location) => {
+    let minDistance = Infinity;
+    let closestPoint = null;
+    
+    for (let i = 0; i < path.length - 1; i++) {
+      const start = path[i];
+      const end = path[i + 1];
+      
+      // Calculate the closest point on the line segment
+      const closest = findClosestPointOnLineSegment(
+        location.lat, location.lng,
+        start.lat, start.lng,
+        end.lat, end.lng
+      );
+      
+      const distance = calculateDistance(
+        location.lat, location.lng,
+        closest.lat, closest.lng
+      );
+      
+      if (distance < minDistance) {
+        minDistance = distance;
+        closestPoint = closest;
+      }
+    }
+    
+    return closestPoint;
+  };
+
+  const findClosestPointOnLineSegment = (x, y, x1, y1, x2, y2) => {
+    const A = x - x1;
+    const B = y - y1;
+    const C = x2 - x1;
+    const D = y2 - y1;
+
+    const dot = A * C + B * D;
+    const len_sq = C * C + D * D;
+    let param = -1;
+    if (len_sq !== 0) {
+      param = dot / len_sq;
+    }
+
+    let xx, yy;
+
+    if (param < 0) {
+      xx = x1;
+      yy = y1;
+    } else if (param > 1) {
+      xx = x2;
+      yy = y2;
+    } else {
+      xx = x1 + param * C;
+      yy = y1 + param * D;
+    }
+
+    return { lat: xx, lng: yy };
+  };
+
+  // Helper function to calculate distance between two points
+  const calculateDistance = (lat1, lng1, lat2, lng2) => {
+    const R = 6371; // Earth's radius in km
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const a = 
+      Math.sin(dLat/2) * Math.sin(dLat/2) +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * 
+      Math.sin(dLng/2) * Math.sin(dLng/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
+  };
+
+  // Helper function to convert degrees to radians
+  const toRad = (value) => {
+    return value * Math.PI / 180;
+  };
+
+  // Helper function to calculate total route distance
+  const calculateRouteDistance = (path) => {
+    let totalDistance = 0;
+    for (let i = 0; i < path.length - 1; i++) {
+      totalDistance += calculateDistance(
+        path[i].lat,
+        path[i].lng,
+        path[i + 1].lat,
+        path[i + 1].lng
+      );
+    }
+    return `${totalDistance.toFixed(1)} km`;
+  };
+
+  // Helper function to estimate route duration
+  const calculateRouteDuration = (distance) => {
+    const distanceInKm = parseFloat(distance);
+    const averageSpeed = 20; // km/h
+    const durationInHours = distanceInKm / averageSpeed;
+    const hours = Math.floor(durationInHours);
+    const minutes = Math.round((durationInHours - hours) * 60);
+    
+    if (hours === 0) {
+      return `${minutes} min`;
+    } else if (minutes === 0) {
+      return `${hours} hr`;
+    } else {
+      return `${hours} hr ${minutes} min`;
+    }
   };
 
   const createMarker = async (location, type) => {
@@ -261,9 +533,16 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
         glyphColor: "#ffffff",
         scale: 1.2
       });
+    } else if (type === 'destination') {
+      markerView = new google.maps.marker.PinElement({
+        background: "#F44336", // Red color for destination
+        borderColor: "#ffffff",
+        glyphColor: "#ffffff",
+        scale: 1.2
+      });
     } else {
       markerView = new google.maps.marker.PinElement({
-        background: "#F44336",
+        background: "#2196F3", // Blue color for other markers
         borderColor: "#ffffff",
         glyphColor: "#ffffff",
         scale: 1.2
@@ -280,11 +559,42 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
     markersRef.current.push(marker);
   };
 
+  const cleanupPolylines = () => {
+    // Clean up all polylines and route dots
+    polylinesRef.current.forEach(polyline => {
+      if (polyline && polyline.setMap) {
+        polyline.setMap(null);
+      }
+    });
+    polylinesRef.current = [];
+  };
+
+  const cleanupMarkers = () => {
+    // Clean up all markers
+    markersRef.current.forEach(marker => {
+      if (marker && marker.setMap) {
+        marker.setMap(null);
+      }
+    });
+    markersRef.current = [];
+
+    // Clean up all event markers
+    eventMarkersRef.current.forEach(marker => {
+      if (marker && marker.setMap) {
+        marker.setMap(null);
+      }
+    });
+    eventMarkersRef.current = [];
+  };
+
   useEffect(() => {
     if (!isMapLoaded || !mapInstanceRef.current) return;
 
     if (origin && destination) {
-      cleanupMap();
+      cleanupPolylines(); // Only clean up polylines and route dots
+
+      const bounds = new window.google.maps.LatLngBounds();
+      let points = [];
 
       if (origin.currentLocation && origin.nearestStation) {
         createMarker(origin.currentLocation, 'current');
@@ -294,18 +604,86 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
         displayRoute(origin.currentLocation, origin.nearestStation, true);
         displayRoute(origin.nearestStation, destination);
 
-        const bounds = new window.google.maps.LatLngBounds();
+        points = [origin.currentLocation, origin.nearestStation, destination];
         bounds.extend(origin.currentLocation);
         bounds.extend(origin.nearestStation);
         bounds.extend(destination);
-        mapInstanceRef.current.fitBounds(bounds, { top: 50, right: 50, bottom: 50, left: 50 });
       } else {
         createMarker(origin.station, 'nearest');
         createMarker(destination, 'destination');
         displayRoute(origin.station, destination);
+
+        points = [origin.station, destination];
+        bounds.extend(origin.station);
+        bounds.extend(destination);
+      }
+
+      // Check if all points are almost the same (distance < 10 meters)
+      const arePointsClose = (pts) => {
+        if (pts.length < 2) return true;
+        const toRad = (v) => v * Math.PI / 180;
+        const dist = (a, b) => {
+          const R = 6371000; // meters
+          const dLat = toRad(b.lat - a.lat);
+          const dLng = toRad(b.lng - a.lng);
+          const lat1 = toRad(a.lat);
+          const lat2 = toRad(b.lat);
+          const aVal = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.sin(dLng/2) * Math.sin(dLng/2) * Math.cos(lat1) * Math.cos(lat2);
+          const c = 2 * Math.atan2(Math.sqrt(aVal), Math.sqrt(1-aVal));
+          return R * c;
+        };
+        for (let i = 0; i < pts.length - 1; i++) {
+          if (dist(pts[i], pts[i+1]) > 10) return false;
+        }
+        return true;
+      };
+
+      const padding = { top: 175, right: 175, bottom: 200, left: 175 };
+      if (arePointsClose(points)) {
+        // If points are very close or identical, center and set min zoom
+        const center = points[0];
+        mapInstanceRef.current.setCenter(center);
+        mapInstanceRef.current.setZoom(16);
+      } else {
+        mapInstanceRef.current.fitBounds(bounds, padding);
       }
     }
   }, [origin, destination, isMapLoaded]);
+
+  // Helper function to check if a point is near the route
+  const isPointNearRoute = (route, point, threshold = 0.5) => { // threshold in kilometers (500 meters)
+    for (let i = 0; i < route.length; i++) {
+      const distance = calculateDistance(
+        point.lat,
+        point.lng,
+        route[i].lat,
+        route[i].lng
+      );
+      if (distance <= threshold) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // Helper function to convert duration string to minutes
+  const parseDurationToMinutes = (duration) => {
+    const parts = duration.split(' ');
+    let totalMinutes = 0;
+    
+    for (let i = 0; i < parts.length; i += 2) {
+      const value = parseInt(parts[i]);
+      const unit = parts[i + 1];
+      
+      if (unit.startsWith('hr')) {
+        totalMinutes += value * 60;
+      } else if (unit.startsWith('min')) {
+        totalMinutes += value;
+      }
+    }
+    
+    return totalMinutes;
+  };
 
   return (
     <div className="map-section">
@@ -314,10 +692,10 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
         style={{ 
           width: '100%',
           height: '100%',
-          minHeight: '600px',
           position: 'relative',
           borderRadius: '8px',
-          overflow: 'hidden'
+          overflow: 'hidden',
+          flex: '1 1 auto'
         }} 
       />
     </div>

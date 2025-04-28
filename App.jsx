@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Routes, Route } from 'react-router-dom'
 import { useUserAuth } from './context/UserAuthContext'
 import MapComponent from './components/MapComponent'
 import StationSelector from './components/StationSelector'
+import RouteInfo from './components/RouteInfo'
 import { getDatabase, ref, push } from 'firebase/database'
+import RouteEditorPage from './components/RouteEditorPage'
 import './App.css'
 
 function App() {
@@ -168,88 +170,97 @@ function App() {
           )}
         </div>
       </header>
-      <main className="App-main">
-        <div className="content-wrapper">
-          <div className="map-section">
-            <StationSelector 
-              onOriginSelect={handleOriginSelect}
-              onDestinationSelect={handleDestinationSelect}
-            />
-            <div className="map-container">
-              <MapComponent 
-                origin={selectedOrigin}
-                destination={selectedDestination}
-                onRouteInfoUpdate={setRouteInfo}
-              />
-            </div>
-          </div>
-          
-          <div className="button-container">
-            <button 
-              className="restricted-button"
-              onClick={handleRestrictedAccess}
-            >
-              Access Admin Dashboard
-            </button>
-            <button 
-              className="feedback-button"
-              onClick={() => setShowFeedback(true)}
-            >
-              Give Feedback
-            </button>
-          </div>
-
-          {(routeInfo.walking.distance || routeInfo.driving.distance) && (
-            <div className="route-info-container">
-              {selectedOrigin?.currentLocation && routeInfo.walking.distance && (
-                <div className="route-info-section">
-                  <h3>Walking to {selectedOrigin.nearestStation.nameEn}</h3>
-                  <p>Distance: {formatDistance(routeInfo.walking.distance)}</p>
-                  <p>Duration: {formatDuration(routeInfo.walking.duration)}</p>
+      <Routes>
+        <Route path="/editroutes" element={<RouteEditorPage />} />
+        <Route path="*" element={
+          <main className="App-main">
+            <div className="content-wrapper">
+              <div className="map-section">
+                <StationSelector 
+                  onOriginSelect={handleOriginSelect}
+                  onDestinationSelect={handleDestinationSelect}
+                />
+                <div className="map-container">
+                  <MapComponent 
+                    origin={selectedOrigin}
+                    destination={selectedDestination}
+                    onRouteInfoUpdate={setRouteInfo}
+                  />
                 </div>
-              )}
-              {routeInfo.driving.distance && (
-                <div className="route-info-section">
-                  <h3>
-                    {selectedOrigin?.currentLocation 
-                      ? `${selectedOrigin.nearestStation.nameEn} to ${selectedDestination.nameEn}`
-                      : `${selectedOrigin.station.nameEn} to ${selectedDestination.nameEn}`}
-                  </h3>
-                  <p>Distance: {formatDistance(routeInfo.driving.distance)}</p>
-                  <p>Duration: {formatDuration(routeInfo.driving.duration)}</p>
-                </div>
-              )}
-              {routeInfo.total.distance && (
-                <div className="route-info-section total">
-                  <h3>Total Journey</h3>
-                  <p>Total Distance: {formatTotalDistance(routeInfo.walking.distance, routeInfo.driving.distance)}</p>
-                  <p>Total Duration: {formatTotalDuration(routeInfo.walking.duration, routeInfo.driving.duration)}</p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {showFeedback && (
-            <div className="feedback-popup">
-              <input
-                type="email"
-                placeholder="Your email (optional)"
-                value={feedbackEmail}
-                onChange={(e) => setFeedbackEmail(e.target.value)}
-              />
-              <textarea 
-                placeholder="Enter your feedback here..." 
-                value={feedbackMessage}
-                onChange={(e) => setFeedbackMessage(e.target.value)}
-              />
-              <div className="feedback-actions">
-                <button className="confirm-btn" onClick={handleFeedbackSubmit}>Submit</button>
-                <button className="cancel-btn" onClick={() => setShowFeedback(false)}>Cancel</button>
               </div>
+              {/* <div className="route-info-section">
+                <RouteInfo routeName="Red" />
+                <RouteInfo routeName="Green" />
+                <RouteInfo routeName="Blue" />
+              </div> */}
+              <div className="button-container">
+                <button 
+                  className="restricted-button"
+                  onClick={handleRestrictedAccess}
+                >
+                  Access Admin Dashboard
+                </button>
+                <button 
+                  className="feedback-button"
+                  onClick={() => setShowFeedback(true)}
+                >
+                  Give Feedback
+                </button>
+              </div>
+
+              {(routeInfo.walking.distance || routeInfo.driving.distance) && (
+                <div className="route-info-container">
+                  {selectedOrigin?.currentLocation && routeInfo.walking.distance && (
+                    <div className="route-info-section">
+                      <h3>Walking to {selectedOrigin.nearestStation.nameEn}</h3>
+                      <p>Distance: {formatDistance(routeInfo.walking.distance)}</p>
+                      <p>Duration: {formatDuration(routeInfo.walking.duration)}</p>
+                    </div>
+                  )}
+                  {routeInfo.driving.distance && (
+                    <div className="route-info-section">
+                      <h3>
+                        {selectedOrigin?.currentLocation 
+                          ? `${selectedOrigin.nearestStation.nameEn} to ${selectedDestination.nameEn}`
+                          : `${selectedOrigin.station.nameEn} to ${selectedDestination.nameEn}`}
+                      </h3>
+                      <p>Distance: {formatDistance(routeInfo.driving.distance)}</p>
+                      <p>Duration: {formatDuration(routeInfo.driving.duration)}</p>
+                    </div>
+                  )}
+                  {routeInfo.total.distance && (
+                    <div className="route-info-section total">
+                      <h3>Total Journey</h3>
+                      <p>Total Distance: {formatTotalDistance(routeInfo.walking.distance, routeInfo.driving.distance)}</p>
+                      <p>Total Duration: {formatTotalDuration(routeInfo.walking.duration, routeInfo.driving.duration)}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {showFeedback && (
+                <div className="feedback-popup">
+                  <input
+                    type="email"
+                    placeholder="Your email (optional)"
+                    value={feedbackEmail}
+                    onChange={(e) => setFeedbackEmail(e.target.value)}
+                  />
+                  <textarea 
+                    placeholder="Enter your feedback here..." 
+                    value={feedbackMessage}
+                    onChange={(e) => setFeedbackMessage(e.target.value)}
+                  />
+                  <div className="feedback-actions">
+                    <button className="confirm-btn" onClick={handleFeedbackSubmit}>Submit</button>
+                    <button className="cancel-btn" onClick={() => setShowFeedback(false)}>Cancel</button>
+                  </div>
+                </div>
+              )}
             </div>
-          )}
-        </div>
-      </main>
+          </main>
+        } />
+      </Routes>
     </div>
   )
 }

@@ -73,6 +73,14 @@ const AdminDashboard = () => {
         Back to Home
       </button>
 
+      <button 
+        className="restricted-button"
+        style={{ marginLeft: 12, marginBottom: 16 }}
+        onClick={() => navigate('/editroutes')}
+      >
+        Edit Routes
+      </button>
+
       <header className="dashboard-header">
         <h1>Event Management</h1>
       </header>
@@ -120,6 +128,12 @@ const AdminDashboard = () => {
           </div>
         ))}
       </div>
+
+      {/* Route Editor Section */}
+      {/* <div className="route-editor-section">
+        <h2>Route Editor</h2>
+        <AdminRouteEditor />
+      </div> */}
     </div>
   );
 };

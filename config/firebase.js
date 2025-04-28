@@ -119,6 +119,56 @@ export const getAllStationNames = async () => {
   }
 };
 
+// Function to get stations by route
+export const getStationsByRoute = async (routeName) => {
+  try {
+    // First get the route data
+    const routesRef = ref(realtimeDb, 'Routes');
+    const routesSnapshot = await new Promise((resolve, reject) => {
+      onValue(routesRef, (snapshot) => {
+        if (snapshot.exists()) {
+          const routes = snapshot.val();
+          const stationIds = routes[routeName] || [];
+          resolve(stationIds);
+        } else {
+          resolve([]);
+        }
+      }, reject, { onlyOnce: true });
+    });
+
+    // Get all stations first
+    const allStationsRef = ref(realtimeDb, 'stations');
+    const allStationsSnapshot = await new Promise((resolve, reject) => {
+      onValue(allStationsRef, (snapshot) => {
+        if (snapshot.exists()) {
+          const stations = Object.entries(snapshot.val()).map(([id, data]) => ({
+            id: id,
+            ...data
+          }));
+          resolve(stations);
+        } else {
+          resolve([]);
+        }
+      }, reject, { onlyOnce: true });
+    });
+
+    // Map route station IDs to their corresponding station data
+    const stations = routesSnapshot.map(stationId => {
+      const station = allStationsSnapshot.find(s => s.id === stationId.toString());
+      return station ? {
+        id: station.id,
+        ...station
+      } : null;
+    });
+
+    // Filter out any null stations and return the array
+    return stations.filter(station => station !== null);
+  } catch (error) {
+    console.error('Error getting stations by route:', error);
+    throw error;
+  }
+};
+
 export { 
   app, 
   auth, 

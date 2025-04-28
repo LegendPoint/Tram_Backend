@@ -75,16 +75,21 @@ const StationSelector = ({ onOriginSelect, onDestinationSelect }) => {
       // Clear current location and nearest station when selecting a different origin
       setCurrentLocation(null);
       setNearestStation(null);
-      const station = stations.find(s => s.id === selectedId);
+      const station = stations.find(s => s.id.toString() === selectedId.toString());
       console.log('Selected origin station:', station);
-      onOriginSelect({ station });
+      if (station) {
+        onOriginSelect({ station });
+      }
     }
   };
 
   const handleDestinationChange = (event) => {
-    const station = stations.find(s => s.id === event.target.value);
+    const selectedId = event.target.value;
+    const station = stations.find(s => s.id.toString() === selectedId.toString());
     console.log('Selected destination station:', station);
-    onDestinationSelect(station);
+    if (station) {
+      onDestinationSelect(station);
+    }
   };
 
   if (loading) {

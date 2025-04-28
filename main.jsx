@@ -8,6 +8,7 @@ import Feedback from './components/Feedback';
 import { UserAuthContextProvider } from './context/UserAuthContext'
 import 'bootstrap/dist/css/bootstrap.min.css'
 import './index.css'
+import RouteEditorPage from './components/RouteEditorPage'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
@@ -18,6 +19,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           <Route path="/login" element={<Login />} />
           <Route path="/dashboard" element={<AdminDashboard />} />
           <Route path="/feedback" element={<Feedback />} />
+          <Route path="/editroutes" element={<RouteEditorPage />} />
         </Routes>
       </Router>
     </UserAuthContextProvider>
