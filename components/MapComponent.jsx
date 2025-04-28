@@ -257,11 +257,11 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
       console.log('Available routes:', availableRoutes);
       console.log('Admin routes:', adminRoutes);
 
-      // Filter common colors to only include those with valid routes
-      const validColors = commonColors.filter(color => 
-        availableRoutes[color] && Array.isArray(availableRoutes[color]) && availableRoutes[color].length > 0 &&
-        adminRoutes[color] && Array.isArray(adminRoutes[color]) && adminRoutes[color].length > 0
-      );
+      // Only require a valid fixed route in adminRoutes
+      const validColors = commonColors.filter(color => {
+        const colorKey = color.toLowerCase();
+        return adminRoutes[colorKey] && Array.isArray(adminRoutes[colorKey]) && adminRoutes[colorKey].length > 0;
+      });
 
       console.log('Valid colors:', validColors);
 
@@ -297,8 +297,9 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
       console.log('Selected route color:', selectedColor);
       setRouteColor(selectedColor);
 
-      // Get the detailed route points from adminRoutes
-      const detailedRoute = adminRoutes[selectedColor];
+      // Use lowercase keys for adminRoutes
+      const colorKey = selectedColor.toLowerCase();
+      const detailedRoute = adminRoutes[colorKey];
       if (!detailedRoute || !Array.isArray(detailedRoute) || detailedRoute.length === 0) {
         console.error('No detailed route points found for selected color');
         return;
@@ -329,29 +330,34 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
       }
 
       // Add the destination point to the route if it's not already included (for non-Blue routes)
-      const lastPoint = routePortion[routePortion.length - 1];
-      const destinationPoint = { lat: endStation.lat, lng: endStation.lng };
-      let finalRoute = [...routePortion];
-      
-      if (selectedColor === 'Blue') {
-        const threshold = 0.05; // 30 meters in km
-        let stopIdx = -1;
-        for (let idx = 0; idx < finalRoute.length; idx++) {
-          const point = finalRoute[idx];
-          const dist = calculateDistance(point.lat, point.lng, endStation.lat, endStation.lng);
-          if (dist <= threshold) {
-            stopIdx = idx;
-            break; // Stop at the first point within 30 meters
-          }
+      const threshold = 0.05; // 30 meters in km
+      let stopIdx = -1;
+      for (let idx = 0; idx < routePortion.length; idx++) {
+        const point = routePortion[idx];
+        const dist = calculateDistance(point.lat, point.lng, endStation.lat, endStation.lng);
+        if (dist <= threshold) {
+          stopIdx = idx;
+          break; // Stop at the first point within 30 meters
         }
-        if (stopIdx !== -1) {
-          finalRoute = finalRoute.slice(0, stopIdx + 1);
+      }
+      if (stopIdx !== -1) {
+        // Keep up to the close point, then connect directly to the destination if close enough
+        routePortion = routePortion.slice(0, stopIdx + 1);
+        const last = routePortion[routePortion.length - 1];
+        const distToDest = calculateDistance(last.lat, last.lng, endStation.lat, endStation.lng);
+        if (distToDest <= threshold && (last.lat !== endStation.lat || last.lng !== endStation.lng)) {
+          routePortion.push({ lat: endStation.lat, lng: endStation.lng });
         }
-        // Do not append the destination point for Blue route
+        // If too far, do not connect to the marker
       } else {
-        if (lastPoint.lat !== destinationPoint.lat || lastPoint.lng !== destinationPoint.lng) {
-          finalRoute.push(destinationPoint);
+        // If no point is within the threshold, keep the original logic for appending destination if close enough
+        const lastPoint = routePortion[routePortion.length - 1];
+        const destinationPoint = { lat: endStation.lat, lng: endStation.lng };
+        const distToDest = calculateDistance(lastPoint.lat, lastPoint.lng, endStation.lat, endStation.lng);
+        if (distToDest <= threshold && (lastPoint.lat !== destinationPoint.lat || lastPoint.lng !== destinationPoint.lng)) {
+          routePortion.push(destinationPoint);
         }
+        // If too far, do not connect to the marker
       }
 
       // Create polyline with the selected portion of the route
@@ -363,7 +369,7 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
       };
 
       const polyline = new google.maps.Polyline({
-        path: finalRoute,
+        path: routePortion,
         icons: [{
           icon: {
             path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
@@ -382,7 +388,7 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
       polylinesRef.current.push(polyline);
 
       // Calculate distance and duration based on the route portion
-      const distance = calculateRouteDistance(finalRoute);
+      const distance = calculateRouteDistance(routePortion);
       const duration = calculateRouteDuration(distance);
       
       onRouteInfoUpdate(prev => ({
@@ -395,9 +401,23 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
       }));
 
       // Check if the selected destination is near the route
-      const isDestinationNearRoute = isPointNearRoute(finalRoute, endStation);
+      const isDestinationNearRoute = isPointNearRoute(routePortion, endStation);
       if (!isDestinationNearRoute) {
         alert('Warning: The selected destination is not near the tram route. Please select a destination closer to the route.');
+      }
+
+      const markerThreshold = 0.01; // 10 meters in km
+      // Connect origin marker to polyline if close enough
+      const firstRoutePoint = routePortion[0];
+      const originDist = calculateDistance(startStation.lat, startStation.lng, firstRoutePoint.lat, firstRoutePoint.lng);
+      if (originDist <= markerThreshold && (startStation.lat !== firstRoutePoint.lat || startStation.lng !== firstRoutePoint.lng)) {
+        routePortion.unshift({ lat: startStation.lat, lng: startStation.lng });
+      }
+      // Connect destination marker to polyline if close enough
+      const lastRoutePoint = routePortion[routePortion.length - 1];
+      const destDist = calculateDistance(endStation.lat, endStation.lng, lastRoutePoint.lat, lastRoutePoint.lng);
+      if (destDist <= markerThreshold && (endStation.lat !== lastRoutePoint.lat || endStation.lng !== lastRoutePoint.lng)) {
+        routePortion.push({ lat: endStation.lat, lng: endStation.lng });
       }
     } catch (error) {
       console.error('Error fetching route information:', error);
@@ -610,6 +630,7 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
 
     if (origin && destination) {
       cleanupPolylines(); // Only clean up polylines and route dots
+      cleanupMarkers();   // Clean up all markers, including destination markers
 
       const bounds = new window.google.maps.LatLngBounds();
       let points = [];
