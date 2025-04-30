@@ -6,9 +6,11 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
   const mapInstanceRef = useRef(null);
   const markersRef = useRef([]);
   const eventMarkersRef = useRef([]);
+  const tramMarkersRef = useRef(new Map()); // Store tram markers
   const polylinesRef = useRef([]); // Store polylines for cleanup
   const [stations, setStations] = useState([]);
   const [events, setEvents] = useState([]);
+  const [tramPositions, setTramPositions] = useState([]);
   const [isMapLoaded, setIsMapLoaded] = useState(false);
   const [routeColor, setRouteColor] = useState(null);
 
@@ -100,6 +102,14 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
       }
     });
     eventMarkersRef.current = [];
+
+    // Clean up all tram markers
+    tramMarkersRef.current.forEach(marker => {
+      if (marker && marker.setMap) {
+        marker.setMap(null);
+      }
+    });
+    tramMarkersRef.current.clear();
   };
 
   const cleanupAll = () => {
@@ -212,6 +222,108 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
 
     return () => unsubscribe();
   }, [isMapLoaded]);
+
+  useEffect(() => {
+    if (!isMapLoaded || !mapInstanceRef.current) return;
+
+    const database = getDatabase();
+    const tramRef = ref(database, 'tram_location');
+
+    const unsubscribe = onValue(tramRef, async (snapshot) => {
+      try {
+        if (snapshot.exists()) {
+          const positions = snapshot.val();
+          // Filter out the 'init' placeholder and convert to array
+          const positionsArray = Object.entries(positions)
+            .filter(([id]) => id !== 'init') // Filter out the 'init' placeholder
+            .map(([id, data]) => ({
+              id,
+              lat: data.latitude,
+              lng: data.longitude,
+              color: data.color,
+              lastUpdated: new Date().toISOString()
+            }));
+          setTramPositions(positionsArray);
+          await updateTramMarkers(positionsArray);
+        }
+      } catch (error) {
+        console.error('Error loading tram positions:', error);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [isMapLoaded]);
+
+  const updateTramMarkers = async (positions) => {
+    if (!mapInstanceRef.current) return;
+
+    const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
+
+    // Remove old markers that are no longer in positions
+    tramMarkersRef.current.forEach((marker, id) => {
+      if (!positions.find(pos => pos.id === id)) {
+        marker.setMap(null);
+        tramMarkersRef.current.delete(id);
+      }
+    });
+
+    // Update or create markers for current positions
+    positions.forEach(position => {
+      if (!position || !position.lat || !position.lng) {
+        console.warn('Invalid tram position data:', position);
+        return;
+      }
+
+      let marker = tramMarkersRef.current.get(position.id);
+      
+      if (!marker) {
+        // Create new marker
+        const markerView = new google.maps.marker.PinElement({
+          background: getColorHex(position.color),
+          borderColor: "#ffffff",
+          glyphColor: "#ffffff",
+          scale: 1.2
+        });
+
+        marker = new AdvancedMarkerElement({
+          map: mapInstanceRef.current,
+          position: { lat: position.lat, lng: position.lng },
+          title: `Tram ${position.id}${position.color ? ` (${position.color})` : ''}`,
+          content: markerView.element
+        });
+
+        // Add info window
+        const infoWindow = new google.maps.InfoWindow({
+          content: `
+            <div style="padding: 10px;">
+              ${position.color ? `<p style="font-size: 16px; font-weight: 800;"><strong>${position.color.charAt(0).toUpperCase() + position.color.slice(1)}</strong></p>` : ''}
+            </div>
+          `
+        });
+
+        marker.addListener('click', () => {
+          infoWindow.open(mapInstanceRef.current, marker);
+        });
+
+        tramMarkersRef.current.set(position.id, marker);
+      } else {
+        // Update existing marker position
+        marker.position = { lat: position.lat, lng: position.lng };
+      }
+    });
+  };
+
+  const getColorHex = (color) => {
+    if (!color) return '#808080'; // Default gray color for undefined colors
+
+    const colorMap = {
+      'red': '#FF0000',
+      'green': '#00FF00',
+      'blue': '#0000FF',
+      'yellow': '#FFFF00'
+    };
+    return colorMap[color.toLowerCase()] || '#808080';
+  };
 
   const displayRoute = async (startStation, endStation) => {
     try {
