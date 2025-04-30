@@ -1,5 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { getDatabase, ref, onValue, get } from 'firebase/database';
+import stationService from '../services/stationService';
+import eventService from '../services/eventService';
+import tramService from '../services/tramService';
+import routeService from '../services/routeService';
 
 const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
   const mapRef = useRef(null);
@@ -127,10 +130,7 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
   useEffect(() => {
     if (!isMapLoaded || !mapInstanceRef.current) return;
 
-    const database = getDatabase();
-    const stationsRef = ref(database, 'stations');
-
-    const unsubscribe = onValue(stationsRef, async (snapshot) => {
+    const unsubscribe = stationService.getAllStations(async (stationsData) => {
       try {
         const loadingElements = mapInstanceRef.current.controls[window.google.maps.ControlPosition.TOP_CENTER].getArray();
         loadingElements.forEach(element => {
@@ -139,20 +139,14 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
           }
         });
 
-        if (snapshot.exists()) {
-          const stationsData = Object.entries(snapshot.val()).map(([id, data]) => ({
-            id,
-            ...data
-          }));
-          setStations(stationsData);
+        setStations(stationsData);
 
-          if (!origin && !destination && stationsData.length > 0) {
-            const bounds = new window.google.maps.LatLngBounds();
-            stationsData.forEach(station => {
-              bounds.extend({ lat: station.lat, lng: station.lng });
-            });
-            mapInstanceRef.current.fitBounds(bounds, { top: 50, right: 50, bottom: 50, left: 50 });
-          }
+        if (!origin && !destination && stationsData.length > 0) {
+          const bounds = new window.google.maps.LatLngBounds();
+          stationsData.forEach(station => {
+            bounds.extend({ lat: station.lat, lng: station.lng });
+          });
+          mapInstanceRef.current.fitBounds(bounds, { top: 50, right: 50, bottom: 50, left: 50 });
         }
       } catch (error) {
         console.error('Error loading stations:', error);
@@ -165,56 +159,47 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
   useEffect(() => {
     if (!isMapLoaded || !mapInstanceRef.current) return;
 
-    const database = getDatabase();
-    const eventsRef = ref(database, 'events');
-
-    const unsubscribe = onValue(eventsRef, async (snapshot) => {
+    const unsubscribe = eventService.getAllEvents(async (eventsData) => {
       try {
-        if (snapshot.exists()) {
-          const eventsData = Object.entries(snapshot.val()).map(([id, data]) => ({
-            id,
-            ...data
-          }));
-          setEvents(eventsData);
+        setEvents(eventsData);
 
-          eventMarkersRef.current.forEach(marker => marker.setMap(null));
-          eventMarkersRef.current = [];
+        eventMarkersRef.current.forEach(marker => marker.setMap(null));
+        eventMarkersRef.current = [];
 
-          const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
-          eventsData.forEach(event => {
-            if (event.location) {
-              const markerView = new google.maps.marker.PinElement({
-                background: "#9C27B0",
-                borderColor: "#ffffff",
-                glyphColor: "#ffffff",
-                scale: 1.2
+        const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
+        eventsData.forEach(event => {
+          if (event.location) {
+            const markerView = new google.maps.marker.PinElement({
+              background: "#9C27B0",
+              borderColor: "#ffffff",
+              glyphColor: "#ffffff",
+              scale: 1.2
+            });
+
+            const marker = new AdvancedMarkerElement({
+              map: mapInstanceRef.current,
+              position: { lat: event.location.lat, lng: event.location.lng },
+              title: event.name,
+              content: markerView.element
+            });
+
+            marker.addListener('click', () => {
+              const infoWindow = new google.maps.InfoWindow({
+                content: `
+                  <div style="padding: 10px;">
+                    <h3>${event.name}</h3>
+                    <p>${event.description}</p>
+                    <p>Start: ${new Date(event.startDate).toLocaleString()}</p>
+                    <p>End: ${new Date(event.endDate).toLocaleString()}</p>
+                  </div>
+                `
               });
+              infoWindow.open(mapInstanceRef.current, marker);
+            });
 
-              const marker = new AdvancedMarkerElement({
-                map: mapInstanceRef.current,
-                position: { lat: event.location.lat, lng: event.location.lng },
-                title: event.name,
-                content: markerView.element
-              });
-
-              marker.addListener('click', () => {
-                const infoWindow = new google.maps.InfoWindow({
-                  content: `
-                    <div style="padding: 10px;">
-                      <h3>${event.name}</h3>
-                      <p>${event.description}</p>
-                      <p>Start: ${new Date(event.startDate).toLocaleString()}</p>
-                      <p>End: ${new Date(event.endDate).toLocaleString()}</p>
-                    </div>
-                  `
-                });
-                infoWindow.open(mapInstanceRef.current, marker);
-              });
-
-              eventMarkersRef.current.push(marker);
-            }
-          });
-        }
+            eventMarkersRef.current.push(marker);
+          }
+        });
       } catch (error) {
         console.error('Error loading events:', error);
       }
@@ -226,26 +211,10 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
   useEffect(() => {
     if (!isMapLoaded || !mapInstanceRef.current) return;
 
-    const database = getDatabase();
-    const tramRef = ref(database, 'tram_location');
-
-    const unsubscribe = onValue(tramRef, async (snapshot) => {
+    const unsubscribe = tramService.getAllTramPositions(async (positionsArray) => {
       try {
-        if (snapshot.exists()) {
-          const positions = snapshot.val();
-          // Filter out the 'init' placeholder and convert to array
-          const positionsArray = Object.entries(positions)
-            .filter(([id]) => id !== 'init') // Filter out the 'init' placeholder
-            .map(([id, data]) => ({
-              id,
-              lat: data.latitude,
-              lng: data.longitude,
-              color: data.color,
-              lastUpdated: new Date().toISOString()
-            }));
-          setTramPositions(positionsArray);
-          await updateTramMarkers(positionsArray);
-        }
+        setTramPositions(positionsArray);
+        await updateTramMarkers(positionsArray);
       } catch (error) {
         console.error('Error loading tram positions:', error);
       }
@@ -355,19 +324,7 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
       }
 
       // Get available routes from the database
-      const db = getDatabase();
-      const routesRef = ref(db, 'Routes');
-      const adminRoutesRef = ref(db, 'adminRoutes');
-      const [routesSnapshot, adminRoutesSnapshot] = await Promise.all([
-        get(routesRef),
-        get(adminRoutesRef)
-      ]);
-      
-      const availableRoutes = routesSnapshot.val() || {};
-      const adminRoutes = adminRoutesSnapshot.val() || {};
-
-      console.log('Available routes:', availableRoutes);
-      console.log('Admin routes:', adminRoutes);
+      const { routes, adminRoutes } = await routeService.getAllRoutes();
 
       // Only require a valid fixed route in adminRoutes
       const validColors = commonColors.filter(color => {
@@ -385,7 +342,7 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
       // Calculate duration for each valid color
       const colorDurations = {};
       for (const color of validColors) {
-        const route = availableRoutes[color];
+        const route = routes[color];
         const startIndex = route.indexOf(startStation.id);
         const endIndex = route.indexOf(endStation.id);
         

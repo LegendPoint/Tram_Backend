@@ -1,35 +1,43 @@
-import { getDatabase, ref, push, set } from 'firebase/database';
+import { getDatabase, ref, push, set, onValue, remove } from 'firebase/database';
 
 class EventService {
   constructor() {
     this.db = getDatabase();
   }
 
+  // Create a new event
   async createEvent(eventData, userId) {
-    try {
-      if (!userId) {
-        throw new Error('You must be logged in to add events');
+    const eventsRef = ref(this.db, 'events');
+    const newEventRef = push(eventsRef);
+    const eventWithUser = {
+      ...eventData,
+      createdBy: userId,
+      createdAt: new Date().toISOString()
+    };
+    await set(newEventRef, eventWithUser);
+    return newEventRef.key;
+  }
+
+  // Get all events with real-time updates
+  getAllEvents(callback) {
+    const eventsRef = ref(this.db, 'events');
+    return onValue(eventsRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const eventsData = Object.entries(snapshot.val()).map(([id, event]) => ({
+          id,
+          ...event
+        }));
+        callback(eventsData);
+      } else {
+        callback([]);
       }
+    });
+  }
 
-      if (!eventData.location) {
-        throw new Error('Please select a location on the map');
-      }
-
-      const eventsRef = ref(this.db, 'events');
-      const newEventRef = push(eventsRef);
-      
-      const eventWithMetadata = {
-        ...eventData,
-        createdBy: userId,
-        createdAt: new Date().toISOString()
-      };
-
-      await set(newEventRef, eventWithMetadata);
-      return { success: true, eventId: newEventRef.key };
-    } catch (error) {
-      console.error('Error creating event:', error);
-      throw error;
-    }
+  // Delete an event
+  async deleteEvent(eventId) {
+    const eventRef = ref(this.db, `events/${eventId}`);
+    await remove(eventRef);
   }
 
   validateEventData(eventData) {

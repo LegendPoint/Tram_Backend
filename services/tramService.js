@@ -41,15 +41,27 @@ class TramService {
     this.loadScheduleData();
   }
 
-  // Get all active tram positions
-  getAllTramPositions() {
-    return Array.from(this.tramPositions.values()).map(tram => ({
-      id: tram.id,
-      lat: tram.lat,
-      lng: tram.lng,
-      color: tram.color,
-      lastUpdated: tram.lastUpdated
-    }));
+  // Get all tram positions with real-time updates
+  getAllTramPositions(callback) {
+    const tramRef = ref(this.db, 'tram_location');
+    return onValue(tramRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const positions = snapshot.val();
+        // Filter out the 'init' placeholder and convert to array
+        const positionsArray = Object.entries(positions)
+          .filter(([id]) => id !== 'init')
+          .map(([id, data]) => ({
+            id,
+            lat: data.latitude,
+            lng: data.longitude,
+            color: data.color,
+            lastUpdated: new Date().toISOString()
+          }));
+        callback(positionsArray);
+      } else {
+        callback([]);
+      }
+    });
   }
 
   // Get tram positions by color
