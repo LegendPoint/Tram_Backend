@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ref, push, set } from 'firebase/database';
-import { getDatabase } from 'firebase/database';
 import { useUserAuth } from '../context/UserAuthContext';
+import eventService from '../services/eventService';
+import Event from '../models/eventModel';
 import './AddEvent.css';
 
 const AddEvent = ({ onClose }) => {
@@ -101,27 +101,13 @@ const AddEvent = ({ onClose }) => {
     e.preventDefault();
     setError(null);
     
-    if (!user) {
-      setError('You must be logged in to add events');
-      return;
-    }
-
-    if (!eventData.location) {
-      setError('Please select a location on the map');
-      return;
-    }
-
     try {
-      const db = getDatabase();
-      const eventsRef = ref(db, 'events');
-      const newEventRef = push(eventsRef);
-      
-      await set(newEventRef, {
-        ...eventData,
-        createdBy: user.uid,
-        createdAt: new Date().toISOString()
-      });
+      // Validate event data using the Event model
+      Event.validate(eventData);
 
+      // Create event using the event service
+      await eventService.createEvent(eventData, user.uid);
+      
       alert('Event added successfully!');
       onClose();
     } catch (error) {
