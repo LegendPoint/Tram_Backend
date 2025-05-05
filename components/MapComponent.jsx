@@ -183,7 +183,7 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
               content: markerView.element
             });
 
-            marker.addListener('click', () => {
+            marker.addListener('gmp-click', () => {
               const infoWindow = new google.maps.InfoWindow({
                 content: `
                   <div style="padding: 10px;">
@@ -311,12 +311,8 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
       const startColors = startStation.colors || [];
       const endColors = endStation.colors || [];
 
-      console.log('Start station colors:', startColors);
-      console.log('End station colors:', endColors);
-
       // Find common colors between stations
       const commonColors = startColors.filter(color => endColors.includes(color));
-      console.log('Common colors:', commonColors);
 
       if (commonColors.length === 0) {
         alert('No common route exists between these stations');
@@ -332,38 +328,13 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
         return adminRoutes[colorKey] && Array.isArray(adminRoutes[colorKey]) && adminRoutes[colorKey].length > 0;
       });
 
-      console.log('Valid colors:', validColors);
-
       if (validColors.length === 0) {
         alert('No valid routes found between these stations');
         return;
       }
 
-      // Calculate duration for each valid color
-      const colorDurations = {};
-      for (const color of validColors) {
-        const route = routes[color];
-        const startIndex = route.indexOf(startStation.id);
-        const endIndex = route.indexOf(endStation.id);
-        
-        if (startIndex !== -1 && endIndex !== -1) {
-          const distance = Math.abs(endIndex - startIndex);
-          colorDurations[color] = distance;
-        }
-      }
-
-      console.log('Color durations:', colorDurations);
-
-      if (Object.keys(colorDurations).length === 0) {
-        alert('Could not find a valid path between these stations');
-        return;
-      }
-
       // Select the color with the shortest duration
-      const selectedColor = Object.entries(colorDurations)
-        .sort(([, a], [, b]) => a - b)[0][0];
-
-      console.log('Selected route color:', selectedColor);
+      const selectedColor = validColors[0];
       setRouteColor(selectedColor);
 
       // Use lowercase keys for adminRoutes
@@ -375,80 +346,33 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
       }
 
       // Find the closest point in the detailed route to each station
-      function findClosestPointIndex(points, target) {
-        let minDist = Infinity, idx = 0;
-        points.forEach((p, i) => {
-          const d = Math.hypot(p.lat - target.lat, p.lng - target.lng);
-          if (d < minDist) { minDist = d; idx = i; }
-        });
-        return idx;
-      }
-      const startIdx = findClosestPointIndex(detailedRoute, startStation);
-      const endIdx = findClosestPointIndex(detailedRoute, endStation);
+      const startIdx = await findClosestPointIndex(detailedRoute, startStation);
+      const endIdx = await findClosestPointIndex(detailedRoute, endStation);
 
-      // Extract the segment, handling wrap-around for loops
+      // Extract the segment
       let routePortion;
       if (startIdx <= endIdx) {
         routePortion = detailedRoute.slice(startIdx, endIdx + 1);
       } else {
-        // If the route is a loop and end is before start, wrap around
         routePortion = [
           ...detailedRoute.slice(startIdx),
           ...detailedRoute.slice(0, endIdx + 1)
         ];
       }
 
-      // Add the destination point to the route if it's not already included (for non-Blue routes)
-      const threshold = 0.05; // 30 meters in km
-      let stopIdx = -1;
-      for (let idx = 0; idx < routePortion.length; idx++) {
-        const point = routePortion[idx];
-        const dist = calculateDistance(point.lat, point.lng, endStation.lat, endStation.lng);
-        if (dist <= threshold) {
-          stopIdx = idx;
-          break; // Stop at the first point within 30 meters
-        }
-      }
-      if (stopIdx !== -1) {
-        // Keep up to the close point, then connect directly to the destination if close enough
-        routePortion = routePortion.slice(0, stopIdx + 1);
-        const last = routePortion[routePortion.length - 1];
-        const distToDest = calculateDistance(last.lat, last.lng, endStation.lat, endStation.lng);
-        if (distToDest <= threshold && (last.lat !== endStation.lat || last.lng !== endStation.lng)) {
-          routePortion.push({ lat: endStation.lat, lng: endStation.lng });
-        }
-        // If too far, do not connect to the marker
-      } else {
-        // If no point is within the threshold, keep the original logic for appending destination if close enough
-        const lastPoint = routePortion[routePortion.length - 1];
-        const destinationPoint = { lat: endStation.lat, lng: endStation.lng };
-        const distToDest = calculateDistance(lastPoint.lat, lastPoint.lng, endStation.lat, endStation.lng);
-        if (distToDest <= threshold && (lastPoint.lat !== destinationPoint.lat || lastPoint.lng !== destinationPoint.lng)) {
-          routePortion.push(destinationPoint);
-        }
-        // If too far, do not connect to the marker
-      }
-
       // Create polyline with the selected portion of the route
-      const routeColors = {
-        'Red': '#F44336',
-        'Blue': '#2196F3',
-        'Green': '#4CAF50',
-        'Yellow': '#FFEB3B'
-      };
-
       const polyline = new google.maps.Polyline({
         path: routePortion,
         icons: [{
           icon: {
             path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
             scale: 4,
-            strokeColor: routeColors[selectedColor] || '#2196F3'
+            strokeColor: getColorHex(selectedColor)
           },
           offset: '20%',
           repeat: '150px'
         }],
-        strokeColor: routeColors[selectedColor] || '#2196F3',
+        strokeColor: getColorHex(selectedColor),
         strokeOpacity: 0.8,
         strokeWeight: 4,
         map: mapInstanceRef.current
@@ -456,60 +380,89 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
 
       polylinesRef.current.push(polyline);
 
-      // Calculate distance and duration based on the route portion
-      const distance = calculateRouteDistance(routePortion);
-      const duration = calculateRouteDuration(distance);
-      
-      onRouteInfoUpdate(prev => ({
-        ...prev,
-        driving: { distance, duration },
-        total: {
-          distance: `${prev.walking.distance} + ${distance}`,
-          duration: `${prev.walking.duration} + ${duration}`
+      // Calculate distance and duration using the geometry library
+      try {
+        const geometry = await google.maps.importLibrary("geometry");
+        let totalDistance = 0;
+        
+        for (let i = 0; i < routePortion.length - 1; i++) {
+          const point1 = new google.maps.LatLng(routePortion[i].lat, routePortion[i].lng);
+          const point2 = new google.maps.LatLng(routePortion[i + 1].lat, routePortion[i + 1].lng);
+          totalDistance += geometry.spherical.computeDistanceBetween(point1, point2);
         }
-      }));
+
+        const distanceInKm = totalDistance / 1000;
+        const averageSpeed = 20; // km/h
+        const durationInMinutes = (distanceInKm / averageSpeed) * 60;
+
+        // Update route information
+        onRouteInfoUpdate(prev => ({
+          ...prev,
+          driving: {
+            distance: `${distanceInKm.toFixed(1)} km`,
+            duration: formatDurationFromMinutes(durationInMinutes)
+          },
+          total: {
+            distance: `${prev.walking.distance} + ${distanceInKm.toFixed(1)} km`,
+            duration: `${prev.walking.duration} + ${formatDurationFromMinutes(durationInMinutes)}`
+          }
+        }));
+      } catch (error) {
+        console.error('Error calculating distance:', error);
+      }
 
       // Check if the selected destination is near the route
-      const isDestinationNearRoute = isPointNearRoute(routePortion, endStation);
+      const isDestinationNearRoute = await isPointNearRoute(routePortion, endStation);
       if (!isDestinationNearRoute) {
         alert('Warning: The selected destination is not near the tram route. Please select a destination closer to the route.');
       }
 
-      const markerThreshold = 0.01; // 10 meters in km
-      // Connect origin marker to polyline if close enough
-      const firstRoutePoint = routePortion[0];
-      const originDist = calculateDistance(startStation.lat, startStation.lng, firstRoutePoint.lat, firstRoutePoint.lng);
-      if (originDist <= markerThreshold && (startStation.lat !== firstRoutePoint.lat || startStation.lng !== firstRoutePoint.lng)) {
-        routePortion.unshift({ lat: startStation.lat, lng: startStation.lng });
-      }
-      // Connect destination marker to polyline if close enough
-      const lastRoutePoint = routePortion[routePortion.length - 1];
-      const destDist = calculateDistance(endStation.lat, endStation.lng, lastRoutePoint.lat, lastRoutePoint.lng);
-      if (destDist <= markerThreshold && (endStation.lat !== lastRoutePoint.lat || endStation.lng !== lastRoutePoint.lng)) {
-        routePortion.push({ lat: endStation.lat, lng: endStation.lng });
-      }
     } catch (error) {
       console.error('Error fetching route information:', error);
       alert('Error loading route information. Please try again.');
     }
   };
 
-  const findClosestPointIndex = (path, location) => {
+  const arePointsClose = async (pts) => {
+    if (pts.length < 2) return true;
+    
+    try {
+      const geometry = await google.maps.importLibrary("geometry");
+      const locationPoint = new google.maps.LatLng(pts[0].lat, pts[0].lng);
+      
+      for (let i = 1; i < pts.length; i++) {
+        const point2 = new google.maps.LatLng(pts[i].lat, pts[i].lng);
+        const distance = geometry.spherical.computeDistanceBetween(locationPoint, point2);
+        
+        if (distance > 10) return false; // 10 meters threshold
+      }
+      return true;
+    } catch (error) {
+      console.error('Error loading geometry library:', error);
+      return true; // Fallback to true if geometry library fails to load
+    }
+  };
+
+  const findClosestPointIndex = async (path, location) => {
     let minDistance = Infinity;
     let closestIndex = 0;
     
-    for (let i = 0; i < path.length; i++) {
-      const distance = calculateDistance(
-        location.lat,
-        location.lng,
-        path[i].lat,
-        path[i].lng
-      );
+    try {
+      const geometry = await google.maps.importLibrary("geometry");
+      const locationPoint = new google.maps.LatLng(location.lat, location.lng);
       
-      if (distance < minDistance) {
-        minDistance = distance;
-        closestIndex = i;
+      for (let i = 0; i < path.length; i++) {
+        const pathPoint = new google.maps.LatLng(path[i].lat, path[i].lng);
+        const distance = geometry.spherical.computeDistanceBetween(locationPoint, pathPoint);
+        
+        if (distance < minDistance) {
+          minDistance = distance;
+          closestIndex = i;
+        }
       }
+    } catch (error) {
+      console.error('Error loading geometry library:', error);
+      return 0; // Fallback to first point if geometry library fails to load
     }
     
     return closestIndex;
@@ -571,24 +524,6 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
     }
 
     return { lat: xx, lng: yy };
-  };
-
-  // Helper function to calculate distance between two points
-  const calculateDistance = (lat1, lng1, lat2, lng2) => {
-    const R = 6371; // Earth's radius in km
-    const dLat = toRad(lat2 - lat1);
-    const dLng = toRad(lng2 - lng1);
-    const a = 
-      Math.sin(dLat/2) * Math.sin(dLat/2) +
-      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * 
-      Math.sin(dLng/2) * Math.sin(dLng/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    return R * c;
-  };
-
-  // Helper function to convert degrees to radians
-  const toRad = (value) => {
-    return value * Math.PI / 180;
   };
 
   // Helper function to calculate total route distance
@@ -697,100 +632,104 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
   useEffect(() => {
     if (!isMapLoaded || !mapInstanceRef.current) return;
 
-    if (origin && destination) {
-      cleanupPolylines(); // Only clean up polylines and route dots
-      cleanupMarkers();   // Clean up all markers, including destination markers
+    const handleRouteUpdate = async () => {
+      if (origin && destination) {
+        cleanupPolylines(); // Only clean up polylines and route dots
+        cleanupMarkers();   // Clean up all markers, including destination markers
 
-      const bounds = new window.google.maps.LatLngBounds();
-      let points = [];
+        const bounds = new window.google.maps.LatLngBounds();
+        let points = [];
 
-      if (origin.currentLocation && origin.nearestStation) {
-        createMarker(origin.currentLocation, 'current');
-        createMarker(origin.nearestStation, 'nearest');
-        createMarker(destination, 'destination');
+        if (origin.currentLocation && origin.nearestStation) {
+          createMarker(origin.currentLocation, 'current');
+          createMarker(origin.nearestStation, 'nearest');
+          createMarker(destination, 'destination');
 
-        displayRoute(origin.currentLocation, origin.nearestStation, true);
-        displayRoute(origin.nearestStation, destination);
+          displayRoute(origin.currentLocation, origin.nearestStation, true);
+          displayRoute(origin.nearestStation, destination);
 
-        points = [origin.currentLocation, origin.nearestStation, destination];
-        bounds.extend(origin.currentLocation);
-        bounds.extend(origin.nearestStation);
-        bounds.extend(destination);
-      } else {
-        createMarker(origin.station, 'nearest');
-        createMarker(destination, 'destination');
-        displayRoute(origin.station, destination);
+          points = [origin.currentLocation, origin.nearestStation, destination];
+          bounds.extend(origin.currentLocation);
+          bounds.extend(origin.nearestStation);
+          bounds.extend(destination);
+        } else {
+          createMarker(origin.station, 'nearest');
+          createMarker(destination, 'destination');
+          displayRoute(origin.station, destination);
 
-        points = [origin.station, destination];
-        bounds.extend(origin.station);
-        bounds.extend(destination);
-      }
-
-      // Check if all points are almost the same (distance < 10 meters)
-      const arePointsClose = (pts) => {
-        if (pts.length < 2) return true;
-        const toRad = (v) => v * Math.PI / 180;
-        const dist = (a, b) => {
-          const R = 6371000; // meters
-          const dLat = toRad(b.lat - a.lat);
-          const dLng = toRad(b.lng - a.lng);
-          const lat1 = toRad(a.lat);
-          const lat2 = toRad(b.lat);
-          const aVal = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.sin(dLng/2) * Math.sin(dLng/2) * Math.cos(lat1) * Math.cos(lat2);
-          const c = 2 * Math.atan2(Math.sqrt(aVal), Math.sqrt(1-aVal));
-          return R * c;
-        };
-        for (let i = 0; i < pts.length - 1; i++) {
-          if (dist(pts[i], pts[i+1]) > 10) return false;
+          points = [origin.station, destination];
+          bounds.extend(origin.station);
+          bounds.extend(destination);
         }
-        return true;
-      };
 
-      const padding = { top: 175, right: 175, bottom: 200, left: 175 };
-      if (arePointsClose(points)) {
-        // If points are very close or identical, center and set min zoom
-        const center = points[0];
-        mapInstanceRef.current.setCenter(center);
-        mapInstanceRef.current.setZoom(16);
-      } else {
-        mapInstanceRef.current.fitBounds(bounds, padding);
+        // Check if all points are almost the same (distance < 10 meters)
+        const arePointsClose2 = async (pts) => {
+          if (pts.length < 2) return true;
+          
+          try {
+            const geometry = await google.maps.importLibrary("geometry");
+            const locationPoint = new google.maps.LatLng(pts[0].lat, pts[0].lng);
+            
+            for (let i = 1; i < pts.length; i++) {
+              const point2 = new google.maps.LatLng(pts[i].lat, pts[i].lng);
+              const distance = geometry.spherical.computeDistanceBetween(locationPoint, point2);
+              
+              if (distance > 10) return false; // 10 meters threshold
+            }
+            return true;
+          } catch (error) {
+            console.error('Error loading geometry library:', error);
+            return true; // Fallback to true if geometry library fails to load
+          }
+        };
+
+        const padding = { top: 175, right: 175, bottom: 200, left: 175 };
+        if (await arePointsClose2(points)) {
+          // If points are very close or identical, center and set min zoom
+          const center = points[0];
+          mapInstanceRef.current.setCenter(center);
+          mapInstanceRef.current.setZoom(16);
+        } else {
+          mapInstanceRef.current.fitBounds(bounds, padding);
+        }
       }
-    }
+    };
+
+    handleRouteUpdate();
   }, [origin, destination, isMapLoaded]);
 
-  // Helper function to check if a point is near the route
-  const isPointNearRoute = (route, point, threshold = 0.5) => { // threshold in kilometers (500 meters)
-    for (let i = 0; i < route.length; i++) {
-      const distance = calculateDistance(
-        point.lat,
-        point.lng,
-        route[i].lat,
-        route[i].lng
-      );
-      if (distance <= threshold) {
-        return true;
+  const isPointNearRoute = async (route, point, threshold = 0.5) => { // threshold in kilometers (500 meters)
+    try {
+      const geometry = await google.maps.importLibrary("geometry");
+      const pointLatLng = new google.maps.LatLng(point.lat, point.lng);
+      
+      for (let i = 0; i < route.length; i++) {
+        const routePoint = new google.maps.LatLng(route[i].lat, route[i].lng);
+        const distance = geometry.spherical.computeDistanceBetween(pointLatLng, routePoint) / 1000; // Convert meters to kilometers
+        
+        if (distance <= threshold) {
+          return true;
+        }
       }
+      return false;
+    } catch (error) {
+      console.error('Error loading geometry library:', error);
+      return true; // Fallback to true if geometry library fails to load
     }
-    return false;
   };
 
-  // Helper function to convert duration string to minutes
-  const parseDurationToMinutes = (duration) => {
-    const parts = duration.split(' ');
-    let totalMinutes = 0;
+  // Helper function to format duration from minutes
+  const formatDurationFromMinutes = (minutes) => {
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = Math.round(minutes % 60);
     
-    for (let i = 0; i < parts.length; i += 2) {
-      const value = parseInt(parts[i]);
-      const unit = parts[i + 1];
-      
-      if (unit.startsWith('hr')) {
-        totalMinutes += value * 60;
-      } else if (unit.startsWith('min')) {
-        totalMinutes += value;
-      }
+    if (hours === 0) {
+      return `${remainingMinutes} min`;
+    } else if (remainingMinutes === 0) {
+      return `${hours} hr`;
+    } else {
+      return `${hours} hr ${remainingMinutes} min`;
     }
-    
-    return totalMinutes;
   };
 
   return (
