@@ -20,6 +20,22 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
   const mahidolCenter = { lat: 13.7949357, lng: 100.3188312 };
   const defaultZoom = 15;
 
+  // Define Mahidol University boundaries
+  const mahidolBoundaries = {
+    north: 13.805, // Northern boundary
+    south: 13.785, // Southern boundary
+    east: 100.325,  // Eastern boundary
+    west: 100.310   // Western boundary
+  };
+
+  // Helper function to check if a point is within Mahidol boundaries
+  const isWithinMahidolBoundaries = (lat, lng) => {
+    return lat >= mahidolBoundaries.south && 
+           lat <= mahidolBoundaries.north && 
+           lng >= mahidolBoundaries.west && 
+           lng <= mahidolBoundaries.east;
+  };
+
   useEffect(() => {
     const initializeMap = () => {
       if (!window.google || !mapRef.current) return;
@@ -213,6 +229,7 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
 
     const unsubscribe = tramService.getAllTramPositions(async (positionsArray) => {
       try {
+        console.log('Received tram positions:', positionsArray);
         setTramPositions(positionsArray);
         await updateTramMarkers(positionsArray);
       } catch (error) {
@@ -294,12 +311,71 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
     return colorMap[color.toLowerCase()] || '#808080';
   };
 
+  const findNearestTram = async (location, stationColors) => {
+    try {
+      let nearestTram = null;
+      let minDistance = Infinity;
+      
+      console.log('Finding nearest tram for station colors:', stationColors);
+      console.log('Current tram positions:', tramPositions);
+      
+      // Filter trams that have common colors with the station and are within Mahidol boundaries
+      const validTrams = tramPositions.filter(tram => {
+        if (!tram || !tram.color || !tram.lat || !tram.lng) {
+          console.log('Invalid tram data:', tram);
+          return false;
+        }
+        
+        // Check if tram is within Mahidol boundaries
+        // if (!isWithinMahidolBoundaries(tram.lat, tram.lng)) {
+        //   console.log('Tram outside Mahidol boundaries:', tram);
+        //   return false;
+        // }
+        
+        // Convert tram's single color to lowercase for comparison
+        const tramColor = tram.color.toLowerCase();
+        // Check if the tram's color is in the station's colors array
+        const hasMatchingColor = stationColors.some(color => color.toLowerCase() === tramColor);
+        console.log('Tram color:', tramColor, 'matches station colors:', hasMatchingColor);
+        return hasMatchingColor;
+      });
+
+      console.log('Valid trams with matching colors:', validTrams);
+
+      if (validTrams.length === 0) {
+        console.log('No trams found with matching colors within Mahidol boundaries:', stationColors);
+        return null;
+      }
+
+      const locationPoint = new google.maps.LatLng(location.lat, location.lng);
+      
+      for (const tram of validTrams) {
+        const tramPoint = new google.maps.LatLng(tram.lat, tram.lng);
+        const distance = google.maps.geometry.spherical.computeDistanceBetween(locationPoint, tramPoint);
+        console.log('Tram distance:', distance/1000, 'km');
+        
+        if (distance < minDistance) {
+          minDistance = distance;
+          nearestTram = tram;
+        }
+      }
+
+      console.log('Found nearest tram:', nearestTram, 'at distance:', minDistance/1000, 'kilometers');
+      return nearestTram;
+    } catch (error) {
+      console.error('Error finding nearest tram:', error);
+      return null;
+    }
+  };
+
   const displayRoute = async (startStation, endStation) => {
     try {
       if (!startStation || !endStation) {
         console.error('Start or end station is undefined');
         return;
       }
+
+      console.log('Displaying route for stations:', { startStation, endStation });
 
       // Check if origin and destination are the same
       if (startStation.id === endStation.id) {
@@ -311,8 +387,11 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
       const startColors = startStation.colors || [];
       const endColors = endStation.colors || [];
 
+      console.log('Station colors:', { startColors, endColors });
+
       // Find common colors between stations
       const commonColors = startColors.filter(color => endColors.includes(color));
+      console.log('Common colors between stations:', commonColors);
 
       if (commonColors.length === 0) {
         alert('No common route exists between these stations');
@@ -321,6 +400,7 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
 
       // Get available routes from the database
       const { routes, adminRoutes } = await routeService.getAllRoutes();
+      console.log('Available routes:', { routes, adminRoutes });
 
       // Only require a valid fixed route in adminRoutes
       const validColors = commonColors.filter(color => {
@@ -328,8 +408,18 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
         return adminRoutes[colorKey] && Array.isArray(adminRoutes[colorKey]) && adminRoutes[colorKey].length > 0;
       });
 
+      console.log('Valid colors with routes:', validColors);
+
       if (validColors.length === 0) {
         alert('No valid routes found between these stations');
+        return;
+      }
+
+      // Find nearest tram to the origin station
+      const nearestTram = await findNearestTram(startStation, startColors);
+      
+      if (!nearestTram) {
+        alert('No suitable tram found with matching colors within Mahidol University. Please check if any trams are available.');
         return;
       }
 
@@ -345,24 +435,27 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
         return;
       }
 
-      // Find the closest point in the detailed route to each station
+      // Find the closest point in the detailed route to the stations
       const startIdx = await findClosestPointIndex(detailedRoute, startStation);
       const endIdx = await findClosestPointIndex(detailedRoute, endStation);
 
-      // Extract the segment
-      let routePortion;
+      // Get route from start to end station following the fixed route
+      let startToEndRoute;
       if (startIdx <= endIdx) {
-        routePortion = detailedRoute.slice(startIdx, endIdx + 1);
+        startToEndRoute = detailedRoute.slice(startIdx, endIdx + 1);
       } else {
-        routePortion = [
+        startToEndRoute = [
           ...detailedRoute.slice(startIdx),
           ...detailedRoute.slice(0, endIdx + 1)
         ];
       }
 
-      // Create polyline with the selected portion of the route
-      const polyline = new google.maps.Polyline({
-        path: routePortion,
+      // Create polylines for both routes
+      const tramToStartPolyline = new google.maps.Polyline({
+        path: [
+          { lat: nearestTram.lat, lng: nearestTram.lng },
+          { lat: startStation.lat, lng: startStation.lng }
+        ],
         icons: [{
           icon: {
             path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
@@ -378,41 +471,120 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
         map: mapInstanceRef.current
       });
 
-      polylinesRef.current.push(polyline);
+      // Create polyline for the fixed route
+      const startToEndPolyline = new google.maps.Polyline({
+        path: startToEndRoute,
+        icons: [{
+          icon: {
+            path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+            scale: 4,
+            strokeColor: getColorHex(selectedColor)
+          },
+          offset: '20%',
+          repeat: '150px'
+        }],
+        strokeColor: getColorHex(selectedColor),
+        strokeOpacity: 0.8,
+        strokeWeight: 4,
+        map: mapInstanceRef.current
+      });
 
-      // Calculate distance and duration using the geometry library
+      polylinesRef.current.push(tramToStartPolyline, startToEndPolyline);
+
+      // Calculate distances and durations using the Google Maps Routes API
       try {
-        const geometry = await google.maps.importLibrary("geometry");
-        let totalDistance = 0;
+        const { DirectionsService } = await window.google.maps.importLibrary('routes');
+        const directionsService = new DirectionsService();
+
+        // 1. Tram to Start Station
+        const tramToStartRequest = {
+          origin: { lat: nearestTram.lat, lng: nearestTram.lng },
+          destination: { lat: startStation.lat, lng: startStation.lng },
+          travelMode: window.google.maps.TravelMode.DRIVING
+        };
+
+        // 2. Start to End Station (using fixed route points as waypoints)
+        const MAX_WAYPOINTS = 20; // Keep well below the API limit
+        let waypoints = startToEndRoute.slice(1, -1)
+          .filter(point =>
+            typeof point.lat === 'number' &&
+            typeof point.lng === 'number' &&
+            !isNaN(point.lat) &&
+            !isNaN(point.lng) &&
+            isWithinMahidolBoundaries(point.lat, point.lng) // Only include waypoints within Mahidol
+          );
         
-        for (let i = 0; i < routePortion.length - 1; i++) {
-          const point1 = new google.maps.LatLng(routePortion[i].lat, routePortion[i].lng);
-          const point2 = new google.maps.LatLng(routePortion[i + 1].lat, routePortion[i + 1].lng);
-          totalDistance += geometry.spherical.computeDistanceBetween(point1, point2);
+        // If too many waypoints, sample them evenly
+        if (waypoints.length > MAX_WAYPOINTS) {
+          const step = Math.ceil(waypoints.length / MAX_WAYPOINTS);
+          waypoints = waypoints.filter((_, idx) => idx % step === 0);
         }
+        
+        waypoints = waypoints.map(point => ({
+          location: { lat: point.lat, lng: point.lng },
+          stopover: false
+        }));
 
-        const distanceInKm = totalDistance / 1000;
-        const averageSpeed = 20; // km/h
-        const durationInMinutes = (distanceInKm / averageSpeed) * 60;
+        const startToEndRequest = {
+          origin: { lat: startStation.lat, lng: startStation.lng },
+          destination: { lat: endStation.lat, lng: endStation.lng },
+          waypoints: waypoints,
+          travelMode: window.google.maps.TravelMode.DRIVING
+        };
 
-        // Update route information
+        // Debug logging for API requests
+        console.log('Directions API request:', {
+          tramToStartRequest,
+          startToEndRequest: { ...startToEndRequest, waypoints }
+        });
+
+        // Run both requests in parallel
+        const [tramToStartResult, startToEndResult] = await Promise.all([
+          new Promise((resolve, reject) => {
+            directionsService.route(tramToStartRequest, (result, status) => {
+              if (status === 'OK') resolve(result);
+              else {
+                console.error('TramToStart Directions request failed:', status, result);
+                reject(status);
+              }
+            });
+          }),
+          new Promise((resolve, reject) => {
+            directionsService.route(startToEndRequest, (result, status) => {
+              if (status === 'OK') resolve(result);
+              else {
+                console.error('StartToEnd Directions request failed:', status, result);
+                reject(status);
+              }
+            });
+          })
+        ]);
+
+        const tramLeg = tramToStartResult.routes[0].legs[0];
+        const startToEndLeg = startToEndResult.routes[0].legs[0];
+
+        // Update route information with actual distance and duration from Routes API
         onRouteInfoUpdate(prev => ({
           ...prev,
-          driving: {
-            distance: `${distanceInKm.toFixed(1)} km`,
-            duration: formatDurationFromMinutes(durationInMinutes)
+          tramToStart: {
+            distance: tramLeg.distance.text,
+            duration: tramLeg.duration.text
+          },
+          startToEnd: {
+            distance: startToEndLeg.distance.text,
+            duration: startToEndLeg.duration.text
           },
           total: {
-            distance: `${prev.walking.distance} + ${distanceInKm.toFixed(1)} km`,
-            duration: `${prev.walking.duration} + ${formatDurationFromMinutes(durationInMinutes)}`
+            distance: `${parseFloat(tramLeg.distance.value / 1000 + startToEndLeg.distance.value / 1000).toFixed(1)} km`,
+            duration: `${Math.round((tramLeg.duration.value + startToEndLeg.duration.value) / 60)} min`
           }
         }));
       } catch (error) {
-        console.error('Error calculating distance:', error);
+        console.error('Error calculating distances with Routes API:', error);
       }
 
       // Check if the selected destination is near the route
-      const isDestinationNearRoute = await isPointNearRoute(routePortion, endStation);
+      const isDestinationNearRoute = await isPointNearRoute(startToEndRoute, endStation);
       if (!isDestinationNearRoute) {
         alert('Warning: The selected destination is not near the tram route. Please select a destination closer to the route.');
       }
@@ -447,22 +619,14 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
     let minDistance = Infinity;
     let closestIndex = 0;
     
-    try {
-      const geometry = await google.maps.importLibrary("geometry");
-      const locationPoint = new google.maps.LatLng(location.lat, location.lng);
+    for (let i = 0; i < path.length; i++) {
+      const pathPoint = new google.maps.LatLng(path[i].lat, path[i].lng);
+      const distance = google.maps.geometry.spherical.computeDistanceBetween(pathPoint, location);
       
-      for (let i = 0; i < path.length; i++) {
-        const pathPoint = new google.maps.LatLng(path[i].lat, path[i].lng);
-        const distance = geometry.spherical.computeDistanceBetween(locationPoint, pathPoint);
-        
-        if (distance < minDistance) {
-          minDistance = distance;
-          closestIndex = i;
-        }
+      if (distance < minDistance) {
+        minDistance = distance;
+        closestIndex = i;
       }
-    } catch (error) {
-      console.error('Error loading geometry library:', error);
-      return 0; // Fallback to first point if geometry library fails to load
     }
     
     return closestIndex;
@@ -483,10 +647,7 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
         end.lat, end.lng
       );
       
-      const distance = calculateDistance(
-        location.lat, location.lng,
-        closest.lat, closest.lng
-      );
+      const distance = google.maps.geometry.spherical.computeDistanceBetween(location, closest);
       
       if (distance < minDistance) {
         minDistance = distance;
@@ -530,12 +691,7 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
   const calculateRouteDistance = (path) => {
     let totalDistance = 0;
     for (let i = 0; i < path.length - 1; i++) {
-      totalDistance += calculateDistance(
-        path[i].lat,
-        path[i].lng,
-        path[i + 1].lat,
-        path[i + 1].lng
-      );
+      totalDistance += google.maps.geometry.spherical.computeDistanceBetween(path[i], path[i + 1]);
     }
     return `${totalDistance.toFixed(1)} km`;
   };
@@ -633,38 +789,38 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
     if (!isMapLoaded || !mapInstanceRef.current) return;
 
     const handleRouteUpdate = async () => {
-      if (origin && destination) {
-        cleanupPolylines(); // Only clean up polylines and route dots
-        cleanupMarkers();   // Clean up all markers, including destination markers
+    if (origin && destination) {
+      cleanupPolylines(); // Only clean up polylines and route dots
+      cleanupMarkers();   // Clean up all markers, including destination markers
 
-        const bounds = new window.google.maps.LatLngBounds();
-        let points = [];
+      const bounds = new window.google.maps.LatLngBounds();
+      let points = [];
 
-        if (origin.currentLocation && origin.nearestStation) {
-          createMarker(origin.currentLocation, 'current');
-          createMarker(origin.nearestStation, 'nearest');
-          createMarker(destination, 'destination');
+      if (origin.currentLocation && origin.nearestStation) {
+        createMarker(origin.currentLocation, 'current');
+        createMarker(origin.nearestStation, 'nearest');
+        createMarker(destination, 'destination');
 
-          displayRoute(origin.currentLocation, origin.nearestStation, true);
-          displayRoute(origin.nearestStation, destination);
+        displayRoute(origin.currentLocation, origin.nearestStation, true);
+        displayRoute(origin.nearestStation, destination);
 
-          points = [origin.currentLocation, origin.nearestStation, destination];
-          bounds.extend(origin.currentLocation);
-          bounds.extend(origin.nearestStation);
-          bounds.extend(destination);
-        } else {
-          createMarker(origin.station, 'nearest');
-          createMarker(destination, 'destination');
-          displayRoute(origin.station, destination);
+        points = [origin.currentLocation, origin.nearestStation, destination];
+        bounds.extend(origin.currentLocation);
+        bounds.extend(origin.nearestStation);
+        bounds.extend(destination);
+      } else {
+        createMarker(origin.station, 'nearest');
+        createMarker(destination, 'destination');
+        displayRoute(origin.station, destination);
 
-          points = [origin.station, destination];
-          bounds.extend(origin.station);
-          bounds.extend(destination);
-        }
+        points = [origin.station, destination];
+        bounds.extend(origin.station);
+        bounds.extend(destination);
+      }
 
-        // Check if all points are almost the same (distance < 10 meters)
+      // Check if all points are almost the same (distance < 10 meters)
         const arePointsClose2 = async (pts) => {
-          if (pts.length < 2) return true;
+        if (pts.length < 2) return true;
           
           try {
             const geometry = await google.maps.importLibrary("geometry");
@@ -675,24 +831,24 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
               const distance = geometry.spherical.computeDistanceBetween(locationPoint, point2);
               
               if (distance > 10) return false; // 10 meters threshold
-            }
-            return true;
+        }
+        return true;
           } catch (error) {
             console.error('Error loading geometry library:', error);
             return true; // Fallback to true if geometry library fails to load
           }
-        };
+      };
 
-        const padding = { top: 175, right: 175, bottom: 200, left: 175 };
+      const padding = { top: 175, right: 175, bottom: 200, left: 175 };
         if (await arePointsClose2(points)) {
-          // If points are very close or identical, center and set min zoom
-          const center = points[0];
-          mapInstanceRef.current.setCenter(center);
-          mapInstanceRef.current.setZoom(16);
-        } else {
-          mapInstanceRef.current.fitBounds(bounds, padding);
-        }
+        // If points are very close or identical, center and set min zoom
+        const center = points[0];
+        mapInstanceRef.current.setCenter(center);
+        mapInstanceRef.current.setZoom(16);
+      } else {
+        mapInstanceRef.current.fitBounds(bounds, padding);
       }
+    }
     };
 
     handleRouteUpdate();
@@ -703,15 +859,15 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
       const geometry = await google.maps.importLibrary("geometry");
       const pointLatLng = new google.maps.LatLng(point.lat, point.lng);
       
-      for (let i = 0; i < route.length; i++) {
+    for (let i = 0; i < route.length; i++) {
         const routePoint = new google.maps.LatLng(route[i].lat, route[i].lng);
         const distance = geometry.spherical.computeDistanceBetween(pointLatLng, routePoint) / 1000; // Convert meters to kilometers
         
-        if (distance <= threshold) {
-          return true;
-        }
+      if (distance <= threshold) {
+        return true;
       }
-      return false;
+    }
+    return false;
     } catch (error) {
       console.error('Error loading geometry library:', error);
       return true; // Fallback to true if geometry library fails to load

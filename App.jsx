@@ -208,31 +208,27 @@ function App() {
                 </button>
               </div>
 
-              {(routeInfo.walking.distance || routeInfo.driving.distance) && (
+              {(routeInfo.tramToStart?.distance || routeInfo.startToEnd?.distance) && (
                 <div className="route-info-container">
-                  {selectedOrigin?.currentLocation && routeInfo.walking.distance && (
+                  {routeInfo.tramToStart?.distance && (
                     <div className="route-info-section">
-                      <h3>Walking to {selectedOrigin.nearestStation.nameEn}</h3>
-                      <p>Distance: {formatDistance(routeInfo.walking.distance)}</p>
-                      <p>Duration: {formatDuration(routeInfo.walking.duration)}</p>
+                      <h3>Tram to Origin Station</h3>
+                      <p>Distance: {routeInfo.tramToStart.distance}</p>
+                      <p>Duration: {routeInfo.tramToStart.duration}</p>
                     </div>
                   )}
-                  {routeInfo.driving.distance && (
+                  {routeInfo.startToEnd?.distance && (
                     <div className="route-info-section">
-                      <h3>
-                        {selectedOrigin?.currentLocation 
-                          ? `${selectedOrigin.nearestStation.nameEn} to ${selectedDestination.nameEn}`
-                          : `${selectedOrigin.station.nameEn} to ${selectedDestination.nameEn}`}
-                      </h3>
-                      <p>Distance: {formatDistance(routeInfo.driving.distance)}</p>
-                      <p>Duration: {formatDuration(routeInfo.driving.duration)}</p>
+                      <h3>Origin to Destination</h3>
+                      <p>Distance: {routeInfo.startToEnd.distance}</p>
+                      <p>Duration: {routeInfo.startToEnd.duration}</p>
                     </div>
                   )}
-                  {routeInfo.total.distance && (
+                  {routeInfo.total?.distance && (
                     <div className="route-info-section total">
                       <h3>Total Journey</h3>
-                      <p>Total Distance: {formatTotalDistance(routeInfo.walking.distance, routeInfo.driving.distance)}</p>
-                      <p>Total Duration: {formatTotalDuration(routeInfo.walking.duration, routeInfo.driving.duration)}</p>
+                      <p>Total Distance: {routeInfo.total.distance}</p>
+                      <p>Total Duration: {routeInfo.total.duration}</p>
                     </div>
                   )}
                 </div>

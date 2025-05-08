@@ -44,7 +44,16 @@ class TramService {
   // Get all tram positions with real-time updates
   getAllTramPositions(callback) {
     const tramRef = ref(this.db, 'tram_location');
+    let lastFetchTime = 0;
+    const FETCH_INTERVAL = 3000; // 3 seconds in milliseconds
+
     return onValue(tramRef, (snapshot) => {
+      const currentTime = Date.now();
+      if (currentTime - lastFetchTime < FETCH_INTERVAL) {
+        return; // Skip if not enough time has passed
+      }
+      lastFetchTime = currentTime;
+
       if (snapshot.exists()) {
         const positions = snapshot.val();
         // Filter out the 'init' placeholder and convert to array
