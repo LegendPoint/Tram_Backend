@@ -14,6 +14,10 @@ const AdminDashboard = () => {
   const { user } = useUserAuth();
   const navigate = useNavigate();
 
+  // Separate events into active and history
+  const activeEvents = events.filter(event => new Date(event.endDate) > new Date());
+  const historyEvents = events.filter(event => new Date(event.endDate) <= new Date());
+
   useEffect(() => {
     const unsubscribeEvents = eventService.getAllEvents((eventsData) => {
       setEvents(eventsData);
@@ -121,24 +125,58 @@ const AdminDashboard = () => {
         </div>
       )}
 
-      <div className="events-list">
-        {events.map(event => (
-          <div key={event.id} className="event-card">
-            <h3>{event.name}</h3>
-            <p>{event.description}</p>
-            <div className="event-details">
-              <p>Start: {new Date(event.startDate).toLocaleString()}</p>
-              <p>End: {new Date(event.endDate).toLocaleString()}</p>
-              <p>Location: {event.location.lat.toFixed(6)}, {event.location.lng.toFixed(6)}</p>
+      {/* Normal Events Section */}
+      <div className="events-section">
+        <h2>Normal Events</h2>
+        <div className="events-list">
+          {activeEvents.map(event => (
+            <div key={event.id} className="event-card">
+              <h3>{event.name}</h3>
+              <p>{event.description}</p>
+              <div className="event-details">
+                <p>Start: {new Date(event.startDate).toLocaleString()}</p>
+                <p>End: {new Date(event.endDate).toLocaleString()}</p>
+                <p>Location: {event.location.lat.toFixed(6)}, {event.location.lng.toFixed(6)}</p>
+              </div>
+              <button 
+                className="delete-button"
+                onClick={() => handleDeleteEvent(event.id)}
+              >
+                Delete Event
+              </button>
             </div>
-            <button 
-              className="delete-button"
-              onClick={() => handleDeleteEvent(event.id)}
-            >
-              Delete Event
-            </button>
-          </div>
-        ))}
+          ))}
+          {activeEvents.length === 0 && (
+            <p className="no-events">No active events found.</p>
+          )}
+        </div>
+      </div>
+
+      {/* History Section */}
+      <div className="events-section history-section">
+        <h2>History</h2>
+        <div className="events-list">
+          {historyEvents.map(event => (
+            <div key={event.id} className="event-card history-card">
+              <h3>{event.name}</h3>
+              <p>{event.description}</p>
+              <div className="event-details">
+                <p>Start: {new Date(event.startDate).toLocaleString()}</p>
+                <p>End: {new Date(event.endDate).toLocaleString()}</p>
+                <p>Location: {event.location.lat.toFixed(6)}, {event.location.lng.toFixed(6)}</p>
+              </div>
+              <button 
+                className="delete-button"
+                onClick={() => handleDeleteEvent(event.id)}
+              >
+                Delete Event
+              </button>
+            </div>
+          ))}
+          {historyEvents.length === 0 && (
+            <p className="no-events">No past events found.</p>
+          )}
+        </div>
       </div>
 
       {/* Route Editor Section */}

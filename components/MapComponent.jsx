@@ -185,35 +185,42 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
         const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
         eventsData.forEach(event => {
           if (event.location) {
-            const markerView = new google.maps.marker.PinElement({
-              background: "#9C27B0",
-              borderColor: "#ffffff",
-              glyphColor: "#ffffff",
-              scale: 1.2
-            });
-
-            const marker = new AdvancedMarkerElement({
-              map: mapInstanceRef.current,
-              position: { lat: event.location.lat, lng: event.location.lng },
-              title: event.name,
-              content: markerView.element
-            });
-
-            marker.addListener('gmp-click', () => {
-              const infoWindow = new google.maps.InfoWindow({
-                content: `
-                  <div style="padding: 10px;">
-                    <h3>${event.name}</h3>
-                    <p>${event.description}</p>
-                    <p>Start: ${new Date(event.startDate).toLocaleString()}</p>
-                    <p>End: ${new Date(event.endDate).toLocaleString()}</p>
-                  </div>
-                `
+            // Check if the event has passed its end date
+            const eventEndDate = new Date(event.endDate);
+            const currentDate = new Date();
+            
+            // Only create marker if the event hasn't ended
+            if (currentDate <= eventEndDate) {
+              const markerView = new google.maps.marker.PinElement({
+                background: "#9C27B0",
+                borderColor: "#ffffff",
+                glyphColor: "#ffffff",
+                scale: 1.2
               });
-              infoWindow.open(mapInstanceRef.current, marker);
-            });
 
-            eventMarkersRef.current.push(marker);
+              const marker = new AdvancedMarkerElement({
+                map: mapInstanceRef.current,
+                position: { lat: event.location.lat, lng: event.location.lng },
+                title: event.name,
+                content: markerView.element
+              });
+
+              marker.addListener('gmp-click', () => {
+                const infoWindow = new google.maps.InfoWindow({
+                  content: `
+                    <div style="padding: 10px;">
+                      <h3>${event.name}</h3>
+                      <p>${event.description}</p>
+                      <p>Start: ${new Date(event.startDate).toLocaleString()}</p>
+                      <p>End: ${new Date(event.endDate).toLocaleString()}</p>
+                    </div>
+                  `
+                });
+                infoWindow.open(mapInstanceRef.current, marker);
+              });
+
+              eventMarkersRef.current.push(marker);
+            }
           }
         });
       } catch (error) {

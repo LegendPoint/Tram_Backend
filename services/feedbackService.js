@@ -1,4 +1,4 @@
-import { getDatabase, ref, onValue, remove } from 'firebase/database';
+import { getDatabase, ref, onValue, remove, update } from 'firebase/database';
 
 class FeedbackService {
   constructor() {
@@ -12,7 +12,8 @@ class FeedbackService {
       if (snapshot.exists()) {
         const feedbackList = Object.entries(snapshot.val()).map(([id, feedback]) => ({
           id,
-          ...feedback
+          ...feedback,
+          isArchived: feedback.isArchived || false
         }));
         callback(feedbackList);
       } else {
@@ -31,6 +32,24 @@ class FeedbackService {
   async deleteAllFeedback() {
     const feedbackRef = ref(this.db, 'feedback');
     await remove(feedbackRef);
+  }
+
+  // Archive a feedback
+  async archiveFeedback(feedbackId) {
+    const feedbackRef = ref(this.db, `feedback/${feedbackId}`);
+    await update(feedbackRef, {
+      isArchived: true,
+      archivedAt: new Date().toISOString()
+    });
+  }
+
+  // Unarchive a feedback
+  async unarchiveFeedback(feedbackId) {
+    const feedbackRef = ref(this.db, `feedback/${feedbackId}`);
+    await update(feedbackRef, {
+      isArchived: false,
+      archivedAt: null
+    });
   }
 }
 
