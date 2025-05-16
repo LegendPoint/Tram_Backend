@@ -110,26 +110,26 @@ const Feedback = () => {
           >
             Clear Archived Feedbacks
           </button>
-          <button className="back-btn" onClick={() => navigate('/dashboard')}>
-            ← Back to Dashboard
-          </button>
+        <button className="back-btn" onClick={() => navigate('/dashboard')}>
+          ← Back to Dashboard
+        </button>
         </div>
       </div>
 
       {/* Active Feedbacks Section */}
       <div className="feedback-section">
         <h2>Active Feedbacks</h2>
-        <div className="feedback-list">
+      <div className="feedback-list">
           {activeFeedbacks.length === 0 ? (
             <p className="no-feedback">No active feedbacks.</p>
-          ) : (
+        ) : (
             activeFeedbacks.map((fb) => (
-              <div key={fb.id} className="feedback-row">
-                <div className="feedback-card">
-                  <h3>{fb.email || 'Anonymous'}</h3>
-                  <span className="timestamp">{formatDate(fb.timestamp)}</span>
-                  <p className="feedback-message">{fb.message}</p>
-                </div>
+            <div key={fb.id} className="feedback-row">
+              <div className="feedback-card">
+                <h3>{fb.email || 'Anonymous'}</h3>
+                <span className="timestamp">{formatDate(fb.timestamp)}</span>
+                <p className="feedback-message">{fb.message}</p>
+              </div>
                 <div className="feedback-actions">
                   <button
                     className="archive-btn"
@@ -178,16 +178,16 @@ const Feedback = () => {
                   >
                     Unarchive
                   </button>
-                  <button
-                    className="delete-btn"
+              <button
+                className="delete-btn"
                     onClick={() => handleDelete(fb.id)}
-                  >
-                    Delete
-                  </button>
+              >
+                Delete
+              </button>
                 </div>
-              </div>
-            ))
-          )}
+            </div>
+          ))
+        )}
         </div>
       </div>
     </div>

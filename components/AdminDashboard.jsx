@@ -128,24 +128,24 @@ const AdminDashboard = () => {
       {/* Normal Events Section */}
       <div className="events-section">
         <h2>Normal Events</h2>
-        <div className="events-list">
+      <div className="events-list">
           {activeEvents.map(event => (
-            <div key={event.id} className="event-card">
-              <h3>{event.name}</h3>
-              <p>{event.description}</p>
-              <div className="event-details">
-                <p>Start: {new Date(event.startDate).toLocaleString()}</p>
-                <p>End: {new Date(event.endDate).toLocaleString()}</p>
-                <p>Location: {event.location.lat.toFixed(6)}, {event.location.lng.toFixed(6)}</p>
-              </div>
-              <button 
-                className="delete-button"
-                onClick={() => handleDeleteEvent(event.id)}
-              >
-                Delete Event
-              </button>
+          <div key={event.id} className="event-card">
+            <h3>{event.name}</h3>
+            <p>{event.description}</p>
+            <div className="event-details">
+              <p>Start: {new Date(event.startDate).toLocaleString()}</p>
+              <p>End: {new Date(event.endDate).toLocaleString()}</p>
+              <p>Location: {event.location.lat.toFixed(6)}, {event.location.lng.toFixed(6)}</p>
             </div>
-          ))}
+            <button 
+              className="delete-button"
+              onClick={() => handleDeleteEvent(event.id)}
+            >
+              Delete Event
+            </button>
+          </div>
+        ))}
           {activeEvents.length === 0 && (
             <p className="no-events">No active events found.</p>
           )}

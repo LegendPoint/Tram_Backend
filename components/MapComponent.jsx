@@ -191,35 +191,35 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
             
             // Only create marker if the event hasn't ended
             if (currentDate <= eventEndDate) {
-              const markerView = new google.maps.marker.PinElement({
-                background: "#9C27B0",
-                borderColor: "#ffffff",
-                glyphColor: "#ffffff",
-                scale: 1.2
-              });
+            const markerView = new google.maps.marker.PinElement({
+              background: "#9C27B0",
+              borderColor: "#ffffff",
+              glyphColor: "#ffffff",
+              scale: 1.2
+            });
 
-              const marker = new AdvancedMarkerElement({
-                map: mapInstanceRef.current,
-                position: { lat: event.location.lat, lng: event.location.lng },
-                title: event.name,
-                content: markerView.element
-              });
+            const marker = new AdvancedMarkerElement({
+              map: mapInstanceRef.current,
+              position: { lat: event.location.lat, lng: event.location.lng },
+              title: event.name,
+              content: markerView.element
+            });
 
-              marker.addListener('gmp-click', () => {
-                const infoWindow = new google.maps.InfoWindow({
-                  content: `
-                    <div style="padding: 10px;">
-                      <h3>${event.name}</h3>
-                      <p>${event.description}</p>
-                      <p>Start: ${new Date(event.startDate).toLocaleString()}</p>
-                      <p>End: ${new Date(event.endDate).toLocaleString()}</p>
-                    </div>
-                  `
-                });
-                infoWindow.open(mapInstanceRef.current, marker);
+            marker.addListener('gmp-click', () => {
+              const infoWindow = new google.maps.InfoWindow({
+                content: `
+                  <div style="padding: 10px;">
+                    <h3>${event.name}</h3>
+                    <p>${event.description}</p>
+                    <p>Start: ${new Date(event.startDate).toLocaleString()}</p>
+                    <p>End: ${new Date(event.endDate).toLocaleString()}</p>
+                  </div>
+                `
               });
+              infoWindow.open(mapInstanceRef.current, marker);
+            });
 
-              eventMarkersRef.current.push(marker);
+            eventMarkersRef.current.push(marker);
             }
           }
         });
@@ -568,7 +568,10 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
   // Store the current main route segment for real-time updates
   const mainRouteSegmentRef = useRef(null);
   const mainRouteColorRef = useRef(null);
+  const secondRouteSegmentRef = useRef(null);
+  const secondRouteColorRef = useRef(null);
   const [currentTramPos, setCurrentTramPos] = useState(null);
+  const [secondTramPos, setSecondTramPos] = useState(null);
 
   // Real-time update of polylines as tram moves
   useEffect(() => {
@@ -637,7 +640,91 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
     });
   }, [currentTramPos]);
 
-  // Modified displayRoute function to use predefined routes and set up real-time polyline update
+  // Real-time update for second tram (transfer route)
+  useEffect(() => {
+    if (!secondRouteSegmentRef.current || !secondRouteColorRef.current || !secondTramPos || !mapInstanceRef.current) return;
+    // Remove previous second route polylines
+    if (polylinesRef.current._secondRoutePassed) {
+      polylinesRef.current._secondRoutePassed.setMap(null);
+    }
+    if (polylinesRef.current._secondRouteRemaining) {
+      polylinesRef.current._secondRouteRemaining.setMap(null);
+    }
+    const routeSegment = secondRouteSegmentRef.current;
+    const color = secondRouteColorRef.current;
+    const tramIdx = findClosestIndexOnPath(routeSegment, secondTramPos);
+    // Calculate distance from tram to closest point on route
+    const tramPoint = secondTramPos;
+    const closestRoutePoint = routeSegment[tramIdx];
+    const dist = Math.sqrt(Math.pow(tramPoint.lat - closestRoutePoint.lat, 2) + Math.pow(tramPoint.lng - closestRoutePoint.lng, 2));
+    const THRESHOLD = 0.0003; // ~30 meters
+    if (dist > THRESHOLD) {
+      // Tram is not on/near the route: show full route in color, no gray segment
+      polylinesRef.current._secondRouteRemaining = new google.maps.Polyline({
+        path: routeSegment,
+        icons: [{
+          icon: {
+            path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+            scale: 4,
+            strokeColor: getColorHex(color)
+          },
+          offset: '20%',
+          repeat: '150px'
+        }],
+        strokeColor: getColorHex(color),
+        strokeOpacity: 0.8,
+        strokeWeight: 4,
+        map: mapInstanceRef.current
+      });
+      return;
+    }
+    // Passed segment: from start to tramIdx
+    if (tramIdx > 0) {
+      polylinesRef.current._secondRoutePassed = new google.maps.Polyline({
+        path: routeSegment.slice(0, tramIdx + 1),
+        strokeColor: '#888888',
+        strokeOpacity: 0.7,
+        strokeWeight: 4,
+        map: mapInstanceRef.current
+      });
+    }
+    // Remaining segment: from tramIdx to end
+    polylinesRef.current._secondRouteRemaining = new google.maps.Polyline({
+      path: routeSegment.slice(tramIdx),
+      icons: [{
+        icon: {
+          path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+          scale: 4,
+          strokeColor: getColorHex(color)
+        },
+        offset: '20%',
+        repeat: '150px'
+      }],
+      strokeColor: getColorHex(color),
+      strokeOpacity: 0.8,
+      strokeWeight: 4,
+      map: mapInstanceRef.current
+    });
+  }, [secondTramPos]);
+
+  // Update tram positions for real-time polyline update
+  useEffect(() => {
+    if (!tramPositions || tramPositions.length === 0) return;
+    
+    // Find trams for both legs of the route
+    const firstTram = tramPositions.find(tram => tram.color === mainRouteColorRef.current);
+    const secondTram = tramPositions.find(tram => tram.color === secondRouteColorRef.current);
+    
+    if (firstTram && firstTram.lat && firstTram.lng) {
+      setCurrentTramPos({ lat: firstTram.lat, lng: firstTram.lng });
+    }
+    
+    if (secondTram && secondTram.lat && secondTram.lng) {
+      setSecondTramPos({ lat: secondTram.lat, lng: secondTram.lng });
+    }
+  }, [tramPositions]);
+
+  // Modified displayRoute function to handle transfer routes
   const displayRoute = async (startStation, endStation) => {
     try {
       if (!startStation || !endStation) {
@@ -656,15 +743,17 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
       const endColors = endStation.colors || [];
       const commonColors = startColors.filter(color => endColors.includes(color));
 
-      // Fetch both adminRoutes (for polylines) and Routes (for station order)
-      const { adminRoutes, routes } = await routeService.getAllRoutes();
+      const { adminRoutes } = await routeService.getAllRoutes();
       console.log('Available adminRoutes:', adminRoutes);
-      console.log('Available ordered routes:', routes);
 
       // Helper to get fixed route segment between two stations
       const getRouteSegment = async (color, fromStation, toStation) => {
         const colorKey = color.toLowerCase();
-        const fixedRoute = adminRoutes[colorKey];
+        // Convert all adminRoutes keys to lowercase for case-insensitive comparison
+        const adminRoutesLower = Object.fromEntries(
+          Object.entries(adminRoutes).map(([key, value]) => [key.toLowerCase(), value])
+        );
+        const fixedRoute = adminRoutesLower[colorKey];
         if (!fixedRoute || !Array.isArray(fixedRoute) || fixedRoute.length === 0) return null;
         const fromIdx = await findClosestPointIndex(fixedRoute, fromStation);
         const toIdx = await findClosestPointIndex(fixedRoute, toStation);
@@ -677,10 +766,6 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
           ];
         }
       };
-
-      // Build a map of stationId -> stationObj
-      const stationMap = {};
-      stations.forEach(station => { stationMap[station.id] = station; });
 
       // Direct route (common color)
       if (commonColors.length > 0) {
@@ -698,25 +783,25 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
           return;
         }
         // Tram to start
-        const tramToStartPolyline = new google.maps.Polyline({
-          path: [
-            { lat: nearestTram.lat, lng: nearestTram.lng },
-            { lat: startStation.lat, lng: startStation.lng }
-          ],
-          icons: [{
-            icon: {
-              path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
-              scale: 4,
-              strokeColor: getColorHex(selectedColor)
-            },
-            offset: '20%',
-            repeat: '150px'
-          }],
-          strokeColor: getColorHex(selectedColor),
-          strokeOpacity: 0.8,
-          strokeWeight: 4,
-          map: mapInstanceRef.current
-        });
+      const tramToStartPolyline = new google.maps.Polyline({
+        path: [
+          { lat: nearestTram.lat, lng: nearestTram.lng },
+          { lat: startStation.lat, lng: startStation.lng }
+        ],
+        icons: [{
+          icon: {
+            path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+            scale: 4,
+            strokeColor: getColorHex(selectedColor)
+          },
+          offset: '20%',
+          repeat: '150px'
+        }],
+        strokeColor: getColorHex(selectedColor),
+        strokeOpacity: 0.8,
+        strokeWeight: 4,
+        map: mapInstanceRef.current
+      });
         polylinesRef.current.push(tramToStartPolyline);
         // Set up for real-time update
         mainRouteSegmentRef.current = routeSegment;
@@ -744,35 +829,36 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
       }
 
       // --- TRANSFER LOGIC ---
-      // No common color: find transfer station using ordered route
+      // No common color: find transfer station
+      // 1. Find nearest tram (use first color of startStation)
       const nearestTram = await findNearestTram(startStation, startColors);
       if (!nearestTram) {
         alert('No suitable tram found with matching colors within Mahidol University. Please check if any trams are available.');
         return;
       }
       const tramColor = nearestTram.color;
-      const tramRouteIds = routes[tramColor.toLowerCase()]; // Array of station IDs in order
-      if (!tramRouteIds || !Array.isArray(tramRouteIds) || tramRouteIds.length === 0) {
-        alert('No ordered route found for the nearest tram color.');
+      const tramRoute = adminRoutes[tramColor.toLowerCase()];
+      if (!tramRoute || !Array.isArray(tramRoute) || tramRoute.length === 0) {
+        alert('No fixed route found for the nearest tram color.');
         return;
       }
-      // Find the index of the origin station in the tram's route
-      const originIdx = tramRouteIds.indexOf(startStation.id);
-      if (originIdx === -1) {
-        alert('Origin station not found in tram route.');
-        return;
-      }
-      // Iterate through the route after the origin to find a transfer station
+      // 2. Find all stations along the tram's route
+      // We'll use all stations in the database that are close to any point in the tramRoute
+      const allStations = stations;
+      // For each point in tramRoute, find the closest station (if within threshold)
+      const routeStations = allStations.filter(station =>
+        tramRoute.some(point => {
+          const dist = Math.sqrt(Math.pow(point.lat - station.lat, 2) + Math.pow(point.lng - station.lng, 2));
+          return dist < 0.0005; // ~50m threshold
+        })
+      );
+      // 3. For each station along the tram's route (before destination), check if it shares a color with the destination
       let transferStation = null;
-      let transferIdx = -1;
-      for (let i = originIdx + 1; i < tramRouteIds.length; i++) {
-        const stationId = tramRouteIds[i];
-        const station = stationMap[stationId];
-        if (!station) continue;
+      for (const station of routeStations) {
+        if (station.id === startStation.id) continue;
         const transferColors = station.colors || [];
         if (transferColors.some(color => endColors.includes(color))) {
           transferStation = station;
-          transferIdx = i;
           break;
         }
       }
@@ -828,27 +914,37 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
         map: mapInstanceRef.current
       });
       polylinesRef.current.push(secondLegPolyline);
-      // Set up for real-time update (for the first leg only)
+      // Set up for real-time update of both legs
       mainRouteSegmentRef.current = firstLegSegment;
       mainRouteColorRef.current = tramColor;
-      setCurrentTramPos({ lat: nearestTram.lat, lng: nearestTram.lng });
-      // 6. Show marker and message at transfer station
-      await createMarker(transferStation, 'transfer');
+      secondRouteSegmentRef.current = secondLegSegment;
+      secondRouteColorRef.current = transferToDestColor;
+
+      // Find both trams
+      const firstTram = await findNearestTram(startStation, [tramColor]);
+      const secondTram = await findNearestTram(transferStation, [transferToDestColor]);
+
+      if (firstTram) {
+        setCurrentTramPos({ lat: firstTram.lat, lng: firstTram.lng });
+      }
+      if (secondTram) {
+        setSecondTramPos({ lat: secondTram.lat, lng: secondTram.lng });
+      }
 
       // Calculate durations for each segment
       const firstLegDuration = await calculateRouteDuration(startStation, transferStation);
       const secondLegDuration = await calculateRouteDuration(transferStation, endStation);
       const totalMins = parseDurationToMinutes(firstLegDuration) + parseDurationToMinutes(secondLegDuration);
       onRouteInfoUpdate({
-        tramToStart: {
+          tramToStart: {
           distance: calculateRouteDistance(firstLegSegment),
           duration: firstLegDuration
-        },
-        startToEnd: {
+          },
+          startToEnd: {
           distance: calculateRouteDistance(secondLegSegment),
           duration: secondLegDuration
-        },
-        total: {
+          },
+          total: {
           distance: (parseFloat(calculateRouteDistance(firstLegSegment)) + parseFloat(calculateRouteDistance(secondLegSegment))).toFixed(1) + ' km',
           duration: totalMins + ' mins'
         }
@@ -859,16 +955,6 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
       alert('Error loading route information. Please try again.');
     }
   };
-
-  // Update tram position for real-time polyline update
-  useEffect(() => {
-    if (!tramPositions || tramPositions.length === 0) return;
-    // For now, use the first tram (or you can match by color, etc.)
-    const tram = tramPositions[0];
-    if (tram && tram.lat && tram.lng) {
-      setCurrentTramPos({ lat: tram.lat, lng: tram.lng });
-    }
-  }, [tramPositions]);
 
   const arePointsClose = async (pts) => {
     if (pts.length < 2) return true;

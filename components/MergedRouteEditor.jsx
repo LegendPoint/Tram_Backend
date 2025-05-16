@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import routeEditorService from '../services/routeEditorService';
 
 const COLORS = {
@@ -8,17 +7,15 @@ const COLORS = {
   green: '#4CAF50'
 };
 
-const RouteEditorPage = () => {
+const MergedRouteEditor = () => {
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const polylineRef = useRef(null);
   const [selectedColor, setSelectedColor] = useState('red');
   const [isMapLoaded, setIsMapLoaded] = useState(false);
   const [error, setError] = useState(null);
-  const navigate = useNavigate();
-  const clickHandlerRef = useRef();
-  const pathHistoryRef = useRef([]); // Store path history for undo
-  const currentPathIndexRef = useRef(-1); // Track current position in history
+  const pathHistoryRef = useRef([]);
+  const currentPathIndexRef = useRef(-1);
 
   // Initialize map
   useEffect(() => {
@@ -38,44 +35,37 @@ const RouteEditorPage = () => {
       lat: latlng.lat(),
       lng: latlng.lng()
     }));
-    
-    // Remove any future history if we're not at the end
     if (currentPathIndexRef.current < pathHistoryRef.current.length - 1) {
       pathHistoryRef.current = pathHistoryRef.current.slice(0, currentPathIndexRef.current + 1);
     }
-    
     pathHistoryRef.current.push(currentPath);
     currentPathIndexRef.current = pathHistoryRef.current.length - 1;
   };
 
-  // Handle undo
+  // Undo/Redo handlers
   const handleUndo = () => {
     if (currentPathIndexRef.current > 0) {
       currentPathIndexRef.current--;
       const previousPath = pathHistoryRef.current[currentPathIndexRef.current];
-      
       if (polylineRef.current) {
         polylineRef.current.setPath(previousPath);
       }
     }
   };
-
-  // Handle redo
   const handleRedo = () => {
     if (currentPathIndexRef.current < pathHistoryRef.current.length - 1) {
       currentPathIndexRef.current++;
       const nextPath = pathHistoryRef.current[currentPathIndexRef.current];
-      
       if (polylineRef.current) {
         polylineRef.current.setPath(nextPath);
       }
     }
   };
 
-  // Handle keyboard shortcuts
+  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.ctrlKey || e.metaKey) { // metaKey for Mac
+      if (e.ctrlKey || e.metaKey) {
         if (e.key === 'z') {
           e.preventDefault();
           if (e.shiftKey) {
@@ -86,7 +76,6 @@ const RouteEditorPage = () => {
         }
       }
     };
-
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
@@ -94,21 +83,17 @@ const RouteEditorPage = () => {
   // Load existing route for selected color
   useEffect(() => {
     if (!isMapLoaded || !mapInstanceRef.current) return;
-
     const loadRoute = async () => {
       try {
         setError(null);
         const path = await routeEditorService.getRouteByColor(selectedColor);
-        
         if (polylineRef.current) {
           polylineRef.current.setMap(null);
           polylineRef.current = null;
         }
-
         // Reset history
         pathHistoryRef.current = [path];
         currentPathIndexRef.current = 0;
-
         polylineRef.current = new window.google.maps.Polyline({
           path,
           map: mapInstanceRef.current,
@@ -126,13 +111,10 @@ const RouteEditorPage = () => {
             repeat: '150px'
           }]
         });
-
-        // Add path change listener
         polylineRef.current.addListener('path_changed', () => {
           saveToHistory(polylineRef.current.getPath());
         });
-
-        // Fit bounds to route
+        // Fit bounds
         if (path.length > 0) {
           const bounds = new window.google.maps.LatLngBounds();
           path.forEach(pt => bounds.extend(pt));
@@ -140,27 +122,21 @@ const RouteEditorPage = () => {
         }
       } catch (error) {
         setError('Error loading route: ' + error.message);
-        console.error('Error loading route:', error);
       }
     };
-
     loadRoute();
   }, [selectedColor, isMapLoaded]);
 
   // Add points to polyline by clicking on the map
   useEffect(() => {
     if (!isMapLoaded || !mapInstanceRef.current) return;
-
-    clickHandlerRef.current = (e) => {
+    const clickHandler = (e) => {
       if (!polylineRef.current) return;
-      console.log('Map clicked at:', e.latLng.toString());
       polylineRef.current.getPath().push(e.latLng);
       saveToHistory(polylineRef.current.getPath());
     };
-
     const map = mapInstanceRef.current;
-    const listener = map.addListener('click', (e) => clickHandlerRef.current(e));
-
+    const listener = map.addListener('click', clickHandler);
     return () => {
       window.google.maps.event.removeListener(listener);
     };
@@ -169,14 +145,12 @@ const RouteEditorPage = () => {
   // Save route
   const handleSave = async () => {
     if (!polylineRef.current) return;
-    
     try {
       setError(null);
       const path = polylineRef.current.getPath().getArray().map(latlng => ({
         lat: latlng.lat(),
         lng: latlng.lng()
       }));
-      
       await routeEditorService.saveRoute(selectedColor, path);
       alert('Route saved successfully!');
     } catch (error) {
@@ -191,16 +165,12 @@ const RouteEditorPage = () => {
       try {
         setError(null);
         await routeEditorService.deleteRoute(selectedColor);
-        
         if (polylineRef.current) {
           polylineRef.current.setMap(null);
           polylineRef.current = null;
         }
-        
-        // Reset history
         pathHistoryRef.current = [[]];
         currentPathIndexRef.current = 0;
-        
         alert('Route deleted successfully!');
       } catch (error) {
         setError('Error deleting route: ' + error.message);
@@ -211,120 +181,60 @@ const RouteEditorPage = () => {
 
   return (
     <div style={{ padding: 24 }}>
-      <button onClick={() => navigate(-1)} style={{ marginBottom: 16 }}>Back to Dashboard</button>
       <h2>Route Editor</h2>
-      
       {error && (
-        <div style={{ 
-          color: '#dc3545', 
-          backgroundColor: '#f8d7da', 
-          padding: '10px', 
-          borderRadius: '4px',
-          marginBottom: '16px'
-        }}>
+        <div style={{ color: '#dc3545', backgroundColor: '#f8d7da', padding: '10px', borderRadius: '4px', marginBottom: '16px' }}>
           {error}
         </div>
       )}
-
       <div style={{ marginBottom: 8 }}>
         <label htmlFor="route-color">Route Color: </label>
-        <select 
-          id="route-color" 
-          value={selectedColor} 
+        <select
+          id="route-color"
+          value={selectedColor}
           onChange={e => setSelectedColor(e.target.value)}
-          style={{
-            padding: '8px',
-            borderRadius: '4px',
-            border: '1px solid #ccc',
-            marginRight: '12px'
-          }}
+          style={{ padding: '8px', borderRadius: '4px', border: '1px solid #ccc', marginRight: '12px' }}
         >
           <option value="red">Red Route</option>
           <option value="blue">Blue Route</option>
           <option value="green">Green Route</option>
         </select>
-        
-        <button 
-          onClick={handleSave} 
-          style={{ 
-            marginRight: 12,
-            padding: '8px 16px',
-            borderRadius: '4px',
-            border: 'none',
-            backgroundColor: '#28a745',
-            color: 'white',
-            cursor: 'pointer'
-          }}
+        <button
+          onClick={handleSave}
+          style={{ marginRight: 12, padding: '8px 16px', borderRadius: '4px', border: 'none', backgroundColor: '#28a745', color: 'white', cursor: 'pointer' }}
         >
           Save Route
         </button>
-        
-        <button 
-          onClick={handleDelete} 
-          style={{ 
-            marginRight: 12,
-            backgroundColor: '#dc3545',
-            color: 'white',
-            border: 'none',
-            padding: '8px 16px',
-            borderRadius: '4px',
-            cursor: 'pointer'
-          }}
+        <button
+          onClick={handleDelete}
+          style={{ marginRight: 12, backgroundColor: '#dc3545', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer' }}
         >
           Delete Route
         </button>
-
-        <button 
+        <button
           onClick={handleUndo}
-          style={{ 
-            marginRight: 12,
-            backgroundColor: '#6c757d',
-            color: 'white',
-            border: 'none',
-            padding: '8px 16px',
-            borderRadius: '4px',
-            cursor: 'pointer'
-          }}
+          style={{ marginRight: 12, backgroundColor: '#6c757d', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer' }}
         >
           Undo (Ctrl+Z)
         </button>
-
-        <button 
+        <button
           onClick={handleRedo}
-          style={{ 
-            backgroundColor: '#6c757d',
-            color: 'white',
-            border: 'none',
-            padding: '8px 16px',
-            borderRadius: '4px',
-            cursor: 'pointer'
-          }}
+          style={{ backgroundColor: '#6c757d', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer' }}
         >
           Redo (Ctrl+Shift+Z)
         </button>
       </div>
-
-      <div 
-        ref={mapRef} 
-        style={{ 
-          width: '100%', 
-          height: '700px', 
-          marginTop: 8, 
-          borderRadius: 8, 
-          overflow: 'hidden',
-          border: '1px solid #ccc'
-        }} 
+      <div
+        ref={mapRef}
+        style={{ width: '100%', height: '700px', marginTop: 8, borderRadius: 8, overflow: 'hidden', border: '1px solid #ccc' }}
       />
-      
-      <p style={{marginTop: 12, color: '#555'}}>
-        Drag the line or points to edit the route. Click "Save Route" to store changes.
-        <br />
-        Use Ctrl+Z to undo and Ctrl+Shift+Z to redo changes.
-        <br />
+      <p style={{ marginTop: 12, color: '#555' }}>
+        Drag the line or points to edit the route. Click "Save Route" to store changes.<br />
+        Use Ctrl+Z to undo and Ctrl+Shift+Z to redo changes.<br />
         Click on points to delete them or drag them to move.
       </p>
     </div>
   );
 };
 
-export default RouteEditorPage; 
+export default MergedRouteEditor; 

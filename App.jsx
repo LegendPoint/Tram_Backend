@@ -5,7 +5,7 @@ import MapComponent from './components/MapComponent'
 import StationSelector from './components/StationSelector'
 import RouteInfo from './components/RouteInfo'
 import { getDatabase, ref, push } from 'firebase/database'
-import RouteEditorPage from './components/RouteEditorPage'
+import MergedRouteEditor from './components/MergedRouteEditor'
 import './App.css'
 
 function App() {
@@ -171,7 +171,7 @@ function App() {
         </div>
       </header>
       <Routes>
-        <Route path="/editroutes" element={<RouteEditorPage />} />
+        <Route path="/editroutes" element={<MergedRouteEditor />} />
         <Route path="*" element={
           <main className="App-main">
             <div className="content-wrapper">
