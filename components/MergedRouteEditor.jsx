@@ -87,6 +87,7 @@ const MergedRouteEditor = () => {
       try {
         setError(null);
         const path = await routeEditorService.getRouteByColor(selectedColor);
+        console.log('Loaded path for', selectedColor, path);
         if (polylineRef.current) {
           polylineRef.current.setMap(null);
           polylineRef.current = null;

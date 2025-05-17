@@ -208,25 +208,123 @@ function App() {
                 </button>
               </div>
 
-              {(routeInfo.tramToStart?.distance || routeInfo.startToEnd?.distance) && (
+              {(routeInfo.tramToStart?.distance || routeInfo.startToEnd?.distance || routeInfo.startToTransfer?.distance) && (
                 <div className="route-info-container">
+                  {/* Direct or transfer: Tram to Origin Station */}
                   {routeInfo.tramToStart?.distance && (
                     <div className="route-info-section">
-                      <h3>Tram to Origin Station</h3>
+                      <h3>
+                        {routeInfo.tramToStart.color && (
+                          <span style={{
+                            display: 'inline-block',
+                            width: 16,
+                            height: 16,
+                            backgroundColor: routeInfo.tramToStart.color,
+                            borderRadius: '50%',
+                            marginRight: 8,
+                            border: '1px solid #888',
+                            verticalAlign: 'middle'
+                          }}></span>
+                        )}
+                        {routeInfo.tramToStart.color ? `${capitalize(routeInfo.tramToStart.color)} Tram to Origin Station` : 'Tram to Origin Station'}
+                      </h3>
                       <p>Distance: {routeInfo.tramToStart.distance}</p>
                       <p>Duration: {routeInfo.tramToStart.duration}</p>
                     </div>
                   )}
-                  {routeInfo.startToEnd?.distance && (
+                  {/* Transfer: Origin to Transfer Station */}
+                  {routeInfo.startToTransfer?.distance && (
                     <div className="route-info-section">
-                      <h3>Origin to Destination</h3>
+                      <h3>
+                        {routeInfo.startToTransfer.color && (
+                          <span style={{
+                            display: 'inline-block',
+                            width: 16,
+                            height: 16,
+                            backgroundColor: routeInfo.startToTransfer.color,
+                            borderRadius: '50%',
+                            marginRight: 8,
+                            border: '1px solid #888',
+                            verticalAlign: 'middle'
+                          }}></span>
+                        )}
+                        {routeInfo.startToTransfer.color ? `${capitalize(routeInfo.startToTransfer.color)} Tram: Origin to Transfer Station` : 'Origin to Transfer Station'}
+                      </h3>
+                      <p>Distance: {routeInfo.startToTransfer.distance}</p>
+                      <p>Duration: {routeInfo.startToTransfer.duration}</p>
+                      {routeInfo.transferStation && <p>Transfer Station: <b>{routeInfo.transferStation}</b></p>}
+                    </div>
+                  )}
+                  {/* Transfer: Tram to Transfer Station */}
+                  {routeInfo.tramToTransfer?.distance && (
+                    <div className="route-info-section">
+                      <h3>
+                        {routeInfo.tramToTransfer.color && (
+                          <span style={{
+                            display: 'inline-block',
+                            width: 16,
+                            height: 16,
+                            backgroundColor: routeInfo.tramToTransfer.color,
+                            borderRadius: '50%',
+                            marginRight: 8,
+                            border: '1px solid #888',
+                            verticalAlign: 'middle'
+                          }}></span>
+                        )}
+                        {routeInfo.tramToTransfer.color ? `${capitalize(routeInfo.tramToTransfer.color)} Tram to Transfer Station` : 'Tram to Transfer Station'}
+                      </h3>
+                      <p>Distance: {routeInfo.tramToTransfer.distance}</p>
+                      <p>Duration: {routeInfo.tramToTransfer.duration}</p>
+                    </div>
+                  )}
+                  {/* Transfer: Transfer Station to Destination */}
+                  {routeInfo.transferToEnd?.distance && (
+                    <div className="route-info-section">
+                      <h3>
+                        {routeInfo.transferToEnd.color && (
+                          <span style={{
+                            display: 'inline-block',
+                            width: 16,
+                            height: 16,
+                            backgroundColor: routeInfo.transferToEnd.color,
+                            borderRadius: '50%',
+                            marginRight: 8,
+                            border: '1px solid #888',
+                            verticalAlign: 'middle'
+                          }}></span>
+                        )}
+                        {routeInfo.transferToEnd.color ? `Transfer Station to Destination (${capitalize(routeInfo.transferToEnd.color)} Tram)` : 'Transfer Station to Destination'}
+                      </h3>
+                      <p>Distance: {routeInfo.transferToEnd.distance}</p>
+                      <p>Duration: {routeInfo.transferToEnd.duration}</p>
+                    </div>
+                  )}
+                  {/* Direct: Origin to Destination */}
+                  {routeInfo.startToEnd?.distance && !routeInfo.startToTransfer && (
+                    <div className="route-info-section">
+                      <h3>
+                        {routeInfo.startToEnd.color && (
+                          <span style={{
+                            display: 'inline-block',
+                            width: 16,
+                            height: 16,
+                            backgroundColor: routeInfo.startToEnd.color,
+                            borderRadius: '50%',
+                            marginRight: 8,
+                            border: '1px solid #888',
+                            verticalAlign: 'middle'
+                          }}></span>
+                        )}
+                        {routeInfo.startToEnd.color ? `Origin to Destination (${capitalize(routeInfo.startToEnd.color)} Tram)` : 'Origin to Destination'}
+                      </h3>
                       <p>Distance: {routeInfo.startToEnd.distance}</p>
                       <p>Duration: {routeInfo.startToEnd.duration}</p>
                     </div>
                   )}
+                  {/* Total Journey */}
                   {routeInfo.total?.distance && (
                     <div className="route-info-section total">
-                      <h3>Total Journey</h3>
+                      <h3>{routeInfo.total.label || 'Total Journey'}</h3>
                       <p>Total Distance: {routeInfo.total.distance}</p>
                       <p>Total Duration: {routeInfo.total.duration}</p>
                     </div>
@@ -259,6 +357,11 @@ function App() {
       </Routes>
     </div>
   )
+}
+
+function capitalize(str) {
+  if (!str) return '';
+  return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
 export default App
