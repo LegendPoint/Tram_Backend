@@ -208,7 +208,11 @@ function App() {
                 </button>
               </div>
 
-              {(routeInfo.tramToStart?.distance || routeInfo.startToEnd?.distance || routeInfo.startToTransfer?.distance) && (
+              {(
+                routeInfo.tramToStart?.distance ||
+                routeInfo.startToEnd?.distance ||
+                routeInfo.startToTransfer?.distance
+              ) ? (
                 <div className="route-info-container">
                   {/* Direct or transfer: Tram to Origin Station */}
                   {routeInfo.tramToStart?.distance && (
@@ -329,6 +333,10 @@ function App() {
                       <p>Total Duration: {routeInfo.total.duration}</p>
                     </div>
                   )}
+                </div>
+              ) : (
+                <div className="route-info-container">
+                  No route found for the selected stations.
                 </div>
               )}
 

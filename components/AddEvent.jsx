@@ -3,6 +3,7 @@ import { useUserAuth } from '../context/UserAuthContext';
 import eventService from '../services/eventService';
 import Event from '../models/eventModel';
 import './AddEvent.css';
+import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 const AddEvent = ({ onClose }) => {
   const { user } = useUserAuth();
@@ -18,6 +19,7 @@ const AddEvent = ({ onClose }) => {
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const markerRef = useRef(null);
+  const [imageFile, setImageFile] = useState(null);
 
   // Initialize map when component mounts
   useEffect(() => {
@@ -100,14 +102,19 @@ const AddEvent = ({ onClose }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError(null);
-    
     try {
-      // Validate event data using the Event model
       Event.validate(eventData);
-
-      // Create event using the event service
-      await eventService.createEvent(eventData, user.uid);
-      
+      // 1. Create event in DB to get eventId
+      const eventId = await eventService.createEvent({ ...eventData, imageUrl: null, imageName: null }, user.uid);
+      let imageUrl = null;
+      if (imageFile && eventId) {
+        const storage = getStorage();
+        const imgRef = storageRef(storage, `Events/${eventId}/${imageFile.name}`);
+        await uploadBytes(imgRef, imageFile);
+        imageUrl = await getDownloadURL(imgRef);
+        // 2. Update event with imageUrl and imageName
+        await eventService.updateEvent(eventId, { imageUrl, imageName: imageFile.name });
+      }
       alert('Event added successfully!');
       onClose();
     } catch (error) {
@@ -178,6 +185,16 @@ const AddEvent = ({ onClose }) => {
               Selected location: {eventData.location.lat.toFixed(6)}, {eventData.location.lng.toFixed(6)}
             </p>
           )}
+        </div>
+
+        <div className="form-group">
+          <label htmlFor="image">Event Image</label>
+          <input
+            type="file"
+            id="image"
+            accept="image/*"
+            onChange={e => setImageFile(e.target.files[0])}
+          />
         </div>
 
         <div className="button-group">

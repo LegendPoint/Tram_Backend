@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUserAuth } from '../context/UserAuthContext';
 import eventService from '../services/eventService';
@@ -10,7 +10,14 @@ const AdminDashboard = () => {
   const [events, setEvents] = useState([]);
   const [feedback, setFeedback] = useState([]);
   const [showAddEvent, setShowAddEvent] = useState(false);
-  const [error, setError] = useState(null);
+  const [showEditEvent, setShowEditEvent] = useState(false);
+  const [editEventData, setEditEventData] = useState(null);
+  const [editImageFile, setEditImageFile] = useState(null);
+  const [editError, setEditError] = useState(null);
+  const [mapLoaded, setMapLoaded] = useState(false);
+  const editMapRef = useRef(null);
+  const editMapInstanceRef = useRef(null);
+  const editMarkerRef = useRef(null);
   const { user } = useUserAuth();
   const navigate = useNavigate();
 
@@ -32,6 +39,72 @@ const AdminDashboard = () => {
       unsubscribeFeedback();
     };
   }, []);
+
+  useEffect(() => {
+    if (showEditEvent && window.google && window.google.maps && editEventData && editEventData.location) {
+      // Only initialize map and marker once
+      if (!editMapRef.current) return;
+      if (!editMapInstanceRef.current) {
+        const mapOptions = {
+          center: { lat: editEventData.location.lat, lng: editEventData.location.lng },
+          zoom: 15,
+          mapId: 'YOUR_MAP_ID',
+          mapTypeControl: true,
+          zoomControl: true,
+          streetViewControl: true,
+          fullscreenControl: true
+        };
+        editMapInstanceRef.current = new window.google.maps.Map(editMapRef.current, mapOptions);
+        // Place marker
+        editMarkerRef.current = new window.google.maps.Marker({
+          position: { lat: editEventData.location.lat, lng: editEventData.location.lng },
+          map: editMapInstanceRef.current,
+          draggable: true
+        });
+        // On marker drag
+        editMarkerRef.current.addListener('dragend', (e) => {
+          const newLocation = {
+            lat: e.latLng.lat(),
+            lng: e.latLng.lng()
+          };
+          setEditEventData(prev => ({ ...prev, location: newLocation }));
+        });
+        // On map click
+        editMapInstanceRef.current.addListener('click', (e) => {
+          const newLocation = {
+            lat: e.latLng.lat(),
+            lng: e.latLng.lng()
+          };
+          editMarkerRef.current.setPosition(newLocation);
+          setEditEventData(prev => ({ ...prev, location: newLocation }));
+        });
+        setMapLoaded(true);
+      }
+    }
+    // Cleanup map on modal close
+    return () => {
+      if (!showEditEvent) {
+        if (editMarkerRef.current) {
+          editMarkerRef.current.setMap(null);
+          editMarkerRef.current = null;
+        }
+        if (editMapInstanceRef.current) {
+          editMapInstanceRef.current = null;
+        }
+        setMapLoaded(false);
+      }
+    };
+  }, [showEditEvent]);
+
+  // Update marker position when location changes (but don't recreate map/marker)
+  useEffect(() => {
+    if (showEditEvent && editMarkerRef.current && editEventData && editEventData.location) {
+      editMarkerRef.current.setPosition(editEventData.location);
+      if (editMapInstanceRef.current) {
+        editMapInstanceRef.current.panTo(editEventData.location);
+      }
+    }
+  }, [editEventData?.location, showEditEvent]);
 
   const handleDeleteEvent = async (eventId) => {
     if (window.confirm('Are you sure you want to delete this event?')) {
@@ -63,6 +136,25 @@ const AdminDashboard = () => {
         console.error('Error deleting all feedback:', error);
         alert('Failed to delete all feedback. Please try again.');
       }
+    }
+  };
+
+  const handleEditEvent = (event) => {
+    setEditEventData(event);
+    setEditImageFile(null);
+    setShowEditEvent(true);
+  };
+
+  const handleEditSubmit = async (e) => {
+    e.preventDefault();
+    setEditError(null);
+    try {
+      await eventService.updateEventWithImage(editEventData.id, editEventData, editImageFile);
+      setShowEditEvent(false);
+      setEditEventData(null);
+      setEditImageFile(null);
+    } catch (error) {
+      setEditError(error.message || 'Failed to update event.');
     }
   };
 
@@ -101,8 +193,6 @@ const AdminDashboard = () => {
         <h1>Event Management</h1>
       </header>
 
-      {error && <div className="error-message">{error}</div>}
-
       <div className="event-controls">
         <button 
           className="add-event-button"
@@ -125,27 +215,116 @@ const AdminDashboard = () => {
         </div>
       )}
 
+      {showEditEvent && (
+        <div className="modal-overlay">
+          <div className="add-event-container">
+            <h2>Edit Event</h2>
+            {editError && <div className="error-message">{editError}</div>}
+            <form onSubmit={handleEditSubmit}>
+              <div className="form-group">
+                <label htmlFor="edit-name">Event Name</label>
+                <input
+                  type="text"
+                  id="edit-name"
+                  name="name"
+                  value={editEventData?.name || ''}
+                  onChange={e => setEditEventData({ ...editEventData, name: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="edit-description">Description</label>
+                <textarea
+                  id="edit-description"
+                  name="description"
+                  value={editEventData?.description || ''}
+                  onChange={e => setEditEventData({ ...editEventData, description: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="edit-startDate">Start Date</label>
+                <input
+                  type="datetime-local"
+                  id="edit-startDate"
+                  name="startDate"
+                  value={editEventData?.startDate || ''}
+                  onChange={e => setEditEventData({ ...editEventData, startDate: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="edit-endDate">End Date</label>
+                <input
+                  type="datetime-local"
+                  id="edit-endDate"
+                  name="endDate"
+                  value={editEventData?.endDate || ''}
+                  onChange={e => setEditEventData({ ...editEventData, endDate: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label>Location</label>
+                <div className="map-container">
+                  <div ref={editMapRef} className="map" style={{ width: '100%', height: '300px' }}></div>
+                </div>
+                {editEventData?.location && (
+                  <p className="location-info">
+                    Selected location: {editEventData.location.lat.toFixed(6)}, {editEventData.location.lng.toFixed(6)}
+                  </p>
+                )}
+              </div>
+              <div className="form-group">
+                <label>Current Image</label>
+                {editEventData?.imageUrl ? (
+                  <img src={editEventData.imageUrl} alt="Event" style={{ maxWidth: 200, marginBottom: 8 }} />
+                ) : (
+                  <span>No image</span>
+                )}
+              </div>
+              <div className="form-group">
+                <label htmlFor="edit-image">Replace Image</label>
+                <input
+                  type="file"
+                  id="edit-image"
+                  accept="image/*"
+                  onChange={e => setEditImageFile(e.target.files[0])}
+                />
+              </div>
+              <div className="button-group">
+                <button type="submit" className="submit-button">Save Changes</button>
+                <button type="button" className="cancel-button" onClick={() => setShowEditEvent(false)}>Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Normal Events Section */}
       <div className="events-section">
         <h2>Normal Events</h2>
-      <div className="events-list">
+        <div className="events-list">
           {activeEvents.map(event => (
-          <div key={event.id} className="event-card">
-            <h3>{event.name}</h3>
-            <p>{event.description}</p>
-            <div className="event-details">
-              <p>Start: {new Date(event.startDate).toLocaleString()}</p>
-              <p>End: {new Date(event.endDate).toLocaleString()}</p>
-              <p>Location: {event.location.lat.toFixed(6)}, {event.location.lng.toFixed(6)}</p>
+            <div key={event.id} className="event-card">
+              <h3>{event.name}</h3>
+              <p>{event.description}</p>
+              <div className="event-details">
+                <p>Start: {new Date(event.startDate).toLocaleString()}</p>
+                <p>End: {new Date(event.endDate).toLocaleString()}</p>
+                {event.location && (
+                  <p>Location: {event.location.lat.toFixed(6)}, {event.location.lng.toFixed(6)}</p>
+                )}
+              </div>
+              <button 
+                className="delete-button"
+                onClick={() => handleDeleteEvent(event.id)}
+              >
+                Delete Event
+              </button>
+              <button className="add-event-button" onClick={() => handleEditEvent(event)}>Edit Event</button>
             </div>
-            <button 
-              className="delete-button"
-              onClick={() => handleDeleteEvent(event.id)}
-            >
-              Delete Event
-            </button>
-          </div>
-        ))}
+          ))}
           {activeEvents.length === 0 && (
             <p className="no-events">No active events found.</p>
           )}
@@ -163,7 +342,9 @@ const AdminDashboard = () => {
               <div className="event-details">
                 <p>Start: {new Date(event.startDate).toLocaleString()}</p>
                 <p>End: {new Date(event.endDate).toLocaleString()}</p>
-                <p>Location: {event.location.lat.toFixed(6)}, {event.location.lng.toFixed(6)}</p>
+                {event.location && (
+                  <p>Location: {event.location.lat.toFixed(6)}, {event.location.lng.toFixed(6)}</p>
+                )}
               </div>
               <button 
                 className="delete-button"
