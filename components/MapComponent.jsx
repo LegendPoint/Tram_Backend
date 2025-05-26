@@ -889,6 +889,7 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
     setCurrentTramPos(null);
     setSecondTramPos(null);
     onRouteInfoUpdate({});
+    const tramSpeed = 20; // km/h, adjust as needed
     try {
       if (!startStation || !endStation) {
         setIsSimulating(false);
@@ -997,31 +998,64 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
 
       // Direct route (common color)
       if (commonColors.length > 0) {
-        // First try to find the nearest tram with any of the common colors
-        const initialNearestTram = await findNearestTram(startStation, commonColors);
-        let selectedColor;
+        let bestTotalDuration = Infinity;
+        let selectedColor = null;
         let finalNearestTram = null;
-        
-        if (initialNearestTram) {
-          // If we found a tram, use its color
-          selectedColor = initialNearestTram.color;
-        } else {
-          // If no tram found, find the color with the shortest route
-          let shortestDistance = Infinity;
-          let shortestColor = commonColors[0]; // Default to first color
+        let bestTramToStartDistance = '';
+        let bestTramToStartDuration = '';
 
-          for (const color of commonColors) {
-            const routeSegment = await getRouteSegment(color, startStation, endStation);
-            if (routeSegment && routeSegment.length >= 2) {
-              const distance = calculateRouteDistance(routeSegment);
-              const distanceValue = parseFloat(distance);
-              if (distanceValue < shortestDistance) {
-                shortestDistance = distanceValue;
-                shortestColor = color;
-              }
-            }
+        // For each common color, calculate total journey time
+        for (const color of commonColors) {
+          // Find nearest tram of this color
+          const nearestTram = await findNearestTram(startStation, [color]);
+          if (!nearestTram) continue;
+
+          // Get route segment from origin to destination
+          const routeSegment = await getRouteSegment(color, startStation, endStation);
+          if (!routeSegment || routeSegment.length < 2) continue;
+
+          // Calculate tram-to-origin segment
+          const fixedRoute = (adminRoutes[color.toLowerCase()] || []);
+          const tramIdx = await findClosestPointIndex(fixedRoute, nearestTram);
+          const originIdx = await findClosestPointIndex(fixedRoute, startStation);
+          let tramToOriginSegment;
+          if (tramIdx <= originIdx) {
+            tramToOriginSegment = fixedRoute.slice(tramIdx, originIdx + 1);
+          } else {
+            tramToOriginSegment = [
+              ...fixedRoute.slice(tramIdx),
+              ...fixedRoute.slice(0, originIdx + 1)
+            ];
           }
-          selectedColor = shortestColor;
+
+          // Calculate total distance along the fixed route segment
+          const tramToStartDistance = calculateRouteDistance(tramToOriginSegment);
+
+          // Calculate duration using average tram speed (e.g., 20 km/h)
+          const tramSpeed = 20; // km/h, adjust as needed
+          const tramToStartDistanceValue = parseFloat(tramToStartDistance); // in km
+          const tramToStartDurationMinutes = Math.round((tramToStartDistanceValue / tramSpeed) * 60);
+          const tramToStartDuration = formatDurationFromMinutes(tramToStartDurationMinutes);
+
+          const startToEndDuration = await calculateRouteDuration(startStation, endStation);
+          
+          // Calculate total duration in minutes
+          const totalDuration = tramToStartDurationMinutes + parseDurationToMinutes(startToEndDuration);
+
+          // Update if this is the fastest route so far
+          if (totalDuration < bestTotalDuration) {
+            bestTotalDuration = totalDuration;
+            selectedColor = color;
+            finalNearestTram = nearestTram;
+            bestTramToStartDistance = tramToStartDistance;
+            bestTramToStartDuration = tramToStartDuration;
+          }
+        }
+
+        if (!selectedColor || !finalNearestTram) {
+          setIsSimulating(false);
+          alert('No suitable tram found with matching colors. Please check if any trams are available.');
+          return;
         }
 
         setRouteColor(selectedColor);
@@ -1065,27 +1099,22 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
         mainRouteSegmentRef.current = routeSegment;
         mainRouteColorRef.current = selectedColor;
         setCurrentTramPos({ lat: finalNearestTram.lat, lng: finalNearestTram.lng });
-        // Calculate tram-to-origin segment along the fixed route
-        const fixedRoute = (adminRoutes[selectedColor.toLowerCase()] || []);
-        const tramIdx = await findClosestPointIndex(fixedRoute, finalNearestTram);
-        const originIdx = await findClosestPointIndex(fixedRoute, startStation);
-        let tramToOriginSegment;
-        if (tramIdx <= originIdx) {
-          tramToOriginSegment = fixedRoute.slice(tramIdx, originIdx + 1);
-        } else {
-          tramToOriginSegment = [
-            ...fixedRoute.slice(tramIdx),
-            ...fixedRoute.slice(0, originIdx + 1)
-          ];
-        }
-        // Calculate durations for each segment
-        const tramToStartDistance = calculateRouteDistance(tramToOriginSegment);
-        const tramToStartDuration = await calculateRouteDuration(
-          tramToOriginSegment[0],
-          tramToOriginSegment[tramToOriginSegment.length - 1]
-        );
-        const startToEndDuration = await calculateRouteDuration(startStation, endStation);
-        const totalMins = parseDurationToMinutes(tramToStartDuration) + parseDurationToMinutes(startToEndDuration);
+        // --- TRAM TO ORIGIN CALCULATION ---
+        // Calculate total distance along the fixed route segment from tram to origin
+        const tramToStartDistance = bestTramToStartDistance;
+        // Calculate duration using average tram speed (e.g., 20 km/h)
+        const tramToStartDuration = bestTramToStartDuration;
+        // --- END TRAM TO ORIGIN CALCULATION ---
+
+        // --- ORIGIN TO DESTINATION CALCULATION ---
+        // Calculate distance and duration along the fixed route segment from origin to destination
+        const startToEndDistance = calculateRouteDistance(routeSegment);
+        const startToEndDistanceValue = parseFloat(startToEndDistance); // in km
+        const startToEndDurationMinutes = Math.round((startToEndDistanceValue / tramSpeed) * 60);
+        const startToEndDuration = formatDurationFromMinutes(startToEndDurationMinutes);
+        // --- END ORIGIN TO DESTINATION CALCULATION ---
+
+        const totalMins = parseDurationToMinutes(tramToStartDuration) + startToEndDurationMinutes;
         onRouteInfoUpdate({
           tramToStart: {
             color: selectedColor,
@@ -1094,12 +1123,12 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
           },
           startToEnd: {
             color: selectedColor,
-            distance: calculateRouteDistance(routeSegment),
+            distance: startToEndDistance,
             duration: startToEndDuration
           },
           total: {
             label: 'Origin to Destination',
-            distance: calculateRouteDistance(routeSegment),
+            distance: startToEndDistance,
             duration: totalMins + ' mins'
           }
         });
