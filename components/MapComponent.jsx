@@ -1360,68 +1360,103 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
       // No common color: find transfer station
 
       // --- NEW TRANSFER LOGIC based on user's refined approach ---
-      // Find all potential transfer routes
-      const potentialTransferRoutes = findColorBasedTransferRoute(logicalRoutesData, stations, startStation, endStation);
-      console.log('DEBUG: Potential transfer routes found:', potentialTransferRoutes);
-
-      if (potentialTransferRoutes.length === 0) {
+      // Find the first valid transfer station encountered on each origin color route by walking along the fixed route polyline
+      const preferredTransferRoutes = [];
+      for (const originColor of startColors) {
+        const polyline = adminRoutes[originColor.toLowerCase()];
+        const logicalRoute = logicalRoutesData[originColor]?.id || [];
+        if (!polyline || polyline.length === 0 || logicalRoute.length === 0) continue;
+        // Find the closest point on the polyline to the origin station
+        const originIdx = await findClosestPointIndex(polyline, { lat: startStation.lat, lng: startStation.lng });
+        // Walk along the polyline from originIdx forward
+        let found = false;
+        for (let i = 1; i < polyline.length && !found; i++) {
+          const idx = (originIdx + i) % polyline.length;
+          const point = polyline[idx];
+          for (const station of stations) {
+            const dist = google.maps.geometry.spherical.computeDistanceBetween(
+              new google.maps.LatLng(point.lat, point.lng),
+              new google.maps.LatLng(station.lat, station.lng)
+            );
+            if (dist <= 10) { // 10 meters
+              // Check if this station is not the origin or destination
+              if (String(station.id) === String(startStation.id) || String(station.id) === String(endStation.id)) continue;
+              // Check if this station is a valid transfer
+              const transferColors = station.colors || [];
+              const sharedColorWithDestination = transferColors.find(color => endColors.includes(color));
+              if (sharedColorWithDestination) {
+                // Check if the destination is reachable from this transfer station on the shared color
+                const routeB = logicalRoutesData[sharedColorWithDestination]?.id || [];
+                if (routeB.some(id => String(id) === String(endStation.id))) {
+                  // Found the first valid transfer path on this origin color route!
+                  preferredTransferRoutes.push({
+                    firstLeg: { color: originColor, from: startStation, to: station },
+                    secondLeg: { color: sharedColorWithDestination, from: station, to: endStation },
+                    transferStation: station
+                  });
+                  found = true;
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
+      console.log('DEBUG: Preferred transfer routes found (first encountered on each color, 10m radius):', preferredTransferRoutes);
+      if (preferredTransferRoutes.length === 0) {
         setIsSimulating(false);
         alert('No suitable transfer station found. Please try a different route.');
         return;
       }
-
-      // Evaluate each potential route and find the best one (minimum estimated total time)
+      // Evaluate each preferred transfer route and find the best one (minimum estimated total time)
       let bestRoute = null;
       let minTotalEstimatedTime = Infinity;
-
-      for (const route of potentialTransferRoutes) {
+      for (const route of preferredTransferRoutes) {
         const { firstLeg, secondLeg, transferStation } = route;
-
         // Estimate time for the first tram to reach the origin
         const firstTram = tramPositions.find(tram => tram.color === firstLeg.color);
         let tramToStartDurationMinutes = 0; // Default if no tram found or calculation fails
         if (firstTram) {
-          // Calculate distance along the first leg's geographic route
           const firstLegGeographicRoute = adminRoutes[firstLeg.color.toLowerCase()];
           const distanceAlongRoute = await calculateDistanceAlongRoute(
             firstLegGeographicRoute,
             { lat: firstTram.lat, lng: firstTram.lng },
             { lat: startStation.lat, lng: startStation.lng }
           );
-
           const tramSpeed = 20; // km/h (assuming average tram speed along the route)
           tramToStartDurationMinutes = Math.round((distanceAlongRoute / tramSpeed) * 60);
         }
-
-        // Estimate travel time for the first leg (Origin to Transfer)
-        const startToTransferDurationStr = await calculateRouteDuration(startStation, transferStation); // Using Google API or fallback
-        const startToTransferDurationMinutes = parseDurationToMinutes(startToTransferDurationStr);
-
+        // Calculate distance and duration for the first leg (Origin to Transfer) along the adminRoutes path
+        const startToTransferDistanceKm = await calculateDistanceAlongRoute(
+          adminRoutes[firstLeg.color.toLowerCase()],
+          { lat: startStation.lat, lng: startStation.lng },
+          { lat: transferStation.lat, lng: transferStation.lng }
+        );
+        const tramSpeedConsistent = 20; // km/h (consistent assumed speed for travel along route segments)
+        const startToTransferDurationMinutes = Math.round((startToTransferDistanceKm / tramSpeedConsistent) * 60);
         // Estimate time for the second tram to reach the transfer station (waiting time)
         const secondTram = tramPositions.find(tram => tram.color === secondLeg.color);
         let tramToTransferDurationMinutes = 0; // Default
         if (secondTram) {
-          // Calculate distance along the second leg's geographic route
           const secondLegGeographicRoute = adminRoutes[secondLeg.color.toLowerCase()];
           const distanceAlongRoute = await calculateDistanceAlongRoute(
             secondLegGeographicRoute,
             { lat: secondTram.lat, lng: secondTram.lng },
             { lat: transferStation.lat, lng: transferStation.lng }
           );
-
           const tramSpeed = 20; // km/h
           tramToTransferDurationMinutes = Math.round((distanceAlongRoute / tramSpeed) * 60);
         }
-
-        // Estimate travel time for the second leg (Transfer to Destination)
-        const transferToEndDurationStr = await calculateRouteDuration(transferStation, endStation); // Using Google API or fallback
-        const transferToEndDurationMinutes = parseDurationToMinutes(transferToEndDurationStr);
-
+        // Calculate distance and duration for the second leg (Transfer to Destination) along the adminRoutes path
+        const transferToEndDistanceKm = await calculateDistanceAlongRoute(
+          adminRoutes[secondLeg.color.toLowerCase()],
+          { lat: transferStation.lat, lng: transferStation.lng },
+          { lat: endStation.lat, lng: endStation.lng }
+        );
+        const transferToEndDurationMinutes = Math.round((transferToEndDistanceKm / tramSpeedConsistent) * 60);
         // Calculate total estimated time for this route
         const totalEstimatedTimeMinutes = tramToStartDurationMinutes + startToTransferDurationMinutes + tramToTransferDurationMinutes + transferToEndDurationMinutes;
-        console.log(`DEBUG: Route via ${transferStation.nameEn} (${firstLeg.color} then ${secondLeg.color}) - Estimated total time: ${totalEstimatedTimeMinutes} mins`);
-
-        // Check if this is the best route found so far
+        console.log(`DEBUG: Preferred Route Option via ${transferStation.nameEn} (${firstLeg.color} then ${secondLeg.color}) - Estimated total time: ${totalEstimatedTimeMinutes} mins`);
         if (totalEstimatedTimeMinutes < minTotalEstimatedTime) {
           minTotalEstimatedTime = totalEstimatedTimeMinutes;
           bestRoute = route;
