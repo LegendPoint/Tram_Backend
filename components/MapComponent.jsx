@@ -4,6 +4,59 @@ import eventService from '../services/eventService';
 import tramService from '../services/tramService';
 import routeService from '../services/routeService';
 
+// Utility function to find all possible transfer stations between two tram colors
+function findTransferStationsBetweenColors(routes, stations, colorA, colorB) {
+  // Get the route arrays for each color
+  const routeA = routes[colorA]?.id || [];
+  const routeB = routes[colorB]?.id || [];
+
+  // Find stations that are present in both routes
+  const transferStations = stations.filter(station =>
+    routeA.some(id => String(id) === String(station.id)) &&
+    routeB.some(id => String(id) === String(station.id))
+  );
+
+  // Log the transfer stations' IDs and colors
+  transferStations.forEach(station => {
+    console.log(`Transfer Station: ID=${station.id}, Colors=${station.colors?.join(', ')}`);
+  });
+
+  return transferStations;
+}
+
+// Find a valid transfer route from origin to destination based on station colors and routes
+// Now returns ALL valid one-transfer routes found.
+function findColorBasedTransferRoute(routes, stations, origin, destination) {
+  const originColors = origin.colors || [];
+  const destinationColors = destination.colors || [];
+  const potentialRoutes = []; // Array to store all valid routes
+
+  for (const colorA of originColors) {
+    const routeA = routes[colorA]?.id || [];
+    for (const stationId of routeA) {
+      if (String(stationId) === String(origin.id) || String(stationId) === String(destination.id)) continue;
+      const transferStation = stations.find(s => String(s.id) === String(stationId));
+      if (!transferStation) continue;
+      const transferColors = transferStation.colors || [];
+      // Find a color shared with the destination
+      const sharedColor = transferColors.find(c => destinationColors.includes(c));
+      if (sharedColor) {
+        // Check if destination is on the sharedColor route from transferStation
+        const routeB = routes[sharedColor]?.id || [];
+        if (routeB.some(id => String(id) === String(destination.id))) {
+          // Found a valid transfer path! Store it.
+          potentialRoutes.push({
+            firstLeg: { color: colorA, from: origin, to: transferStation },
+            secondLeg: { color: sharedColor, from: transferStation, to: destination },
+            transferStation: transferStation
+          });
+        }
+      }
+    }
+  }
+  return potentialRoutes; // Return all potential routes
+}
+
 const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
@@ -465,15 +518,37 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
           {
             origin: { lat: origin.lat, lng: origin.lng },
             destination: { lat: destination.lat, lng: destination.lng },
-            travelMode: google.maps.TravelMode.DRIVING,
+            travelMode: google.maps.TravelMode.DRIVING, // Using DRIVING as a proxy for tram movement on roads
           },
           (result, status) => {
             if (status === "OK") {
               const duration = result.routes[0].legs[0].duration.text;
               resolve(duration);
             } else {
-              console.error("Error calculating route duration:", status);
-              // Fallback to manual calculation if API fails
+              console.error("Error calculating route duration via Google API:", status);
+              // Fallback to manual calculation using distance along the fixed route if available
+              // Need access to adminRoutes here to use calculateDistanceAlongRoute
+              // For now, using the simpler fallback or we need to pass adminRoutes to this function
+
+              // Since adminRoutes isn't directly available in this helper, 
+              // and passing it might complicate things, let's use calculateDistanceAlongRoute 
+              // outside this function where adminRoutes is available.
+              // For now, keep the previous simple fallback if API fails, but ideally, 
+              // the distance along adminRoutes should be used for duration fallback.
+
+              // A better approach: calculate distance along adminRoutes *before* calling this function,
+              // and pass that distance and an average speed to this function.
+              // For immediate fix, let's calculate distance along route here, assuming adminRoutes is accessible (it might not be in this isolated helper scope)
+
+              // TEMPORARY FALLBACK IMPROVEMENT (requires adminRoutes in scope or passed in)
+              // Assuming adminRoutes is accessible (might require refactoring to pass it or use context)
+              let distanceAlongFixedRoute = 0;
+              // Need color info to select the correct adminRoute
+              // This helper function structure is problematic for calculating along specific colored routes.
+
+              // REVERTING TO SIMPLE FALLBACK FOR NOW due to scope limitations of helper function
+              // A better approach requires restructuring where distance/duration are calculated.
+
               const distance = google.maps.geometry.spherical.computeDistanceBetween(
                 { lat: origin.lat, lng: origin.lng },
                 { lat: destination.lat, lng: destination.lng }
@@ -488,9 +563,78 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
         );
       });
     } catch (error) {
-      console.error("Error in calculateRouteDuration:", error);
-      return "Unknown duration";
+      console.error("Error in calculateRouteDuration (API call setup):", error);
+      // Fallback to manual calculation using straight-line distance if API setup fails
+      const distance = google.maps.geometry.spherical.computeDistanceBetween(
+        { lat: origin.lat, lng: origin.lng },
+        { lat: destination.lat, lng: destination.lng }
+      ) / 1000; // Convert to kilometers
+      const averageSpeed = 20; // km/h
+      const durationInHours = distance / averageSpeed;
+      const hours = Math.floor(durationInHours);
+      const minutes = Math.round((durationInHours - hours) * 60);
+      return (hours === 0 ? minutes + " min" : hours + " hr " + minutes + " min");
     }
+  };
+
+  // Helper function to calculate distance along a geographic route between two points
+  const calculateDistanceAlongRoute = async (geographicRoute, startPoint, endPoint) => {
+    if (!geographicRoute || geographicRoute.length < 2) return 0;
+
+    const startPointIndex = await findClosestPointIndex(geographicRoute, startPoint);
+    const endPointIndex = await findClosestPointIndex(geographicRoute, endPoint);
+
+    // If start and end are the same point or very close on the route, distance is negligible
+    if (startPointIndex === endPointIndex) {
+        // Could add a small distance if they are not exactly the same coordinate but map to the same index
+        // but for simplicity, let's return 0 if they map to the same index.
+        return 0;
+    }
+
+    let totalDistance = 0;
+    let currentIndex = startPointIndex;
+    const routeLength = geographicRoute.length;
+    let steps = 0;
+
+    // Determine the direction of traversal along the geographic route
+    // This is tricky for circular routes. A simple approach is to see if the endPointIndex is ahead 
+    // or behind the startPointIndex in the array order, potentially wrapping around.
+    // A more robust approach would align with the logical route direction if available, but this helper
+    // is just for geographic distance along adminRoutes.
+    // Let's assume for simplicity that the shorter path along the geographic polyline is intended.
+
+    // Calculate distance traversing forwards
+    let distanceForward = 0;
+    let currentIdxForward = startPointIndex;
+    let stepsForward = 0;
+    while (currentIdxForward !== endPointIndex && stepsForward < routeLength) {
+        const nextIdx = (currentIdxForward + 1) % routeLength;
+        distanceForward += google.maps.geometry.spherical.computeDistanceBetween(
+            geographicRoute[currentIdxForward],
+            geographicRoute[nextIdx]
+        );
+        currentIdxForward = nextIdx;
+        stepsForward++;
+    }
+
+    // Calculate distance traversing backwards
+    let distanceBackward = 0;
+    let currentIdxBackward = startPointIndex;
+    let stepsBackward = 0;
+     while (currentIdxBackward !== endPointIndex && stepsBackward < routeLength) {
+        const prevIdx = (currentIdxBackward - 1 + routeLength) % routeLength;
+         distanceBackward += google.maps.geometry.spherical.computeDistanceBetween(
+             geographicRoute[currentIdxBackward],
+             geographicRoute[prevIdx]
+         );
+         currentIdxBackward = prevIdx;
+         stepsBackward++;
+    }
+
+    // Choose the shorter distance
+    totalDistance = Math.min(distanceForward, distanceBackward);
+
+    return totalDistance / 1000; // Return distance in kilometers
   };
 
   // Helper function to find route between stations from database
@@ -965,35 +1109,112 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
       const endColors = endStation.colors || [];
       const commonColors = startColors.filter(color => endColors.includes(color));
 
-      const { adminRoutes } = await routeService.getAllRoutes();
-      console.log('Available adminRoutes:', adminRoutes);
+      // Fetch both the coordinate-based routes (for map drawing) and the logical routes (for calculations)
+      const { adminRoutes, routes: logicalRoutesData } = await routeService.getAllRoutes();
+      console.log('Available adminRoutes (for map):', adminRoutes);
+      console.log('Available logicalRoutesData (for logic):', logicalRoutesData);
+
+      // DEBUG: Check the structure of specific routes within logicalRoutesData
+      console.log('DEBUG: Structure of logicalRoutesData.Green:', logicalRoutesData?.Green);
+      console.log('DEBUG: Structure of logicalRoutesData.Red:', logicalRoutesData?.Red);
 
       // Helper to get fixed route segment between two stations
       const getRouteSegment = async (color, fromStation, toStation) => {
         const colorKey = color.toLowerCase();
-        // Convert all adminRoutes keys to lowercase for case-insensitive comparison
-        const adminRoutesLower = Object.fromEntries(
-          Object.entries(adminRoutes).map(([key, value]) => [key.toLowerCase(), value])
-        );
-        const fixedRoute = adminRoutesLower[colorKey];
-        if (!fixedRoute || !Array.isArray(fixedRoute) || fixedRoute.length === 0) return null;
-        // --- Find the closest indexes on the fixed route to the markers ---
-        const fromIdx = await findClosestPointIndex(fixedRoute, fromStation);
-        const toIdx = await findClosestPointIndex(fixedRoute, toStation);
-        let path;
-        // --- Use the indexes to slice the fixed route, so the polyline follows the adminRoute ---
-        if (fromIdx <= toIdx) {
-          // Forward direction
-          path = fixedRoute.slice(fromIdx, toIdx + 1); // <-- This line makes the polyline follow the fixed route from fromIdx to toIdx
-        } else {
-          // Wrap around (for circular routes)
-          path = [
-            ...fixedRoute.slice(fromIdx), // <-- This and the next line together make the polyline follow the fixed route in a circular fashion
-            ...fixedRoute.slice(0, toIdx + 1)
-          ];
+        // Use adminRoutes for geographic path
+        const geographicRoute = adminRoutes[colorKey];
+        if (!geographicRoute || !Array.isArray(geographicRoute) || geographicRoute.length === 0) return null;
+
+        // Find the indices on the geographic route closest to the stations' coordinates
+        const fromPointIndex = await findClosestPointIndex(geographicRoute, { lat: fromStation.lat, lng: fromStation.lng });
+        const toPointIndex = await findClosestPointIndex(geographicRoute, { lat: toStation.lat, lng: toStation.lng });
+
+        // Get the logical route to determine the intended direction of travel
+        const logicalRoute = logicalRoutesData[color]?.id || [];
+        const fromLogicalIndex = logicalRoute.findIndex(id => String(id) === String(fromStation.id));
+        const toLogicalIndex = logicalRoute.findIndex(id => String(id) === String(toStation.id));
+
+        // Determine the intended direction of travel along the logical route
+        // This is needed to traverse the geographic route in the matching direction.
+        let direction = 0; // 0: undetermined, 1: forwards, -1: backwards
+        if (fromLogicalIndex !== -1 && toLogicalIndex !== -1) {
+          const logicalRouteLength = logicalRoute.length;
+          // Check forward traversal in logical route
+          let currentLogicalIndex = fromLogicalIndex;
+          let stepsForward = 0;
+          while (currentLogicalIndex !== toLogicalIndex && stepsForward < logicalRouteLength) {
+            currentLogicalIndex = (currentLogicalIndex + 1) % logicalRouteLength;
+            stepsForward++;
+          }
+          if (currentLogicalIndex === toLogicalIndex) {
+            direction = 1; // Forwards logically
+          } else {
+            // Check backward traversal in logical route
+            currentLogicalIndex = fromLogicalIndex;
+            let stepsBackward = 0;
+            while (currentLogicalIndex !== toLogicalIndex && stepsBackward < logicalRouteLength) {
+              currentLogicalIndex = (currentLogicalIndex - 1 + logicalRouteLength) % logicalRouteLength;
+              stepsBackward++;
+            }
+            if (currentLogicalIndex === toLogicalIndex) {
+              direction = -1; // Backwards logically
+            }
+          }
         }
-        // Do NOT add marker coordinates, just use the fixed route segment
-        return path;
+
+        // Traverse the geographic route array based on the determined logical direction
+        let geographicSegment = [];
+        let currentGeographicIndex = fromPointIndex;
+        const geographicRouteLength = geographicRoute.length;
+        let steps = 0;
+
+        // Handle cases where from and to points are the same or direction is undetermined
+        if (fromPointIndex === toPointIndex || direction === 0) {
+            // If the points are the same or direction is unclear, just return a single point or the segment between them if they are close
+            if (fromPointIndex === toPointIndex && geographicRouteLength > 0) {
+                geographicSegment.push(geographicRoute[fromPointIndex]);
+            } else if (direction === 0) {
+                // Fallback: use simple slice if direction couldn't be determined
+                const sliceStartIndex = Math.min(fromPointIndex, toPointIndex);
+                const sliceEndIndex = Math.max(fromPointIndex, toPointIndex);
+                geographicSegment = geographicRoute.slice(sliceStartIndex, sliceEndIndex + 1);
+                // Potentially reverse if from comes after to geographically but not logically handled above
+                if (fromPointIndex > toPointIndex && (fromLogicalIndex === -1 || toLogicalIndex === -1 || fromLogicalIndex > toLogicalIndex)) {
+                     geographicSegment.reverse(); // Simple heuristic reverse if logical order is unclear or backward
+                }
+            }
+        } else {
+          // Traverse the geographic route in the determined direction
+          while (currentGeographicIndex !== toPointIndex && steps < geographicRouteLength) {
+            geographicSegment.push(geographicRoute[currentGeographicIndex]);
+            if (direction === 1) {
+              currentGeographicIndex = (currentGeographicIndex + 1) % geographicRouteLength;
+            } else if (direction === -1) {
+              currentGeographicIndex = (currentGeographicIndex - 1 + geographicRouteLength) % geographicRouteLength;
+            }
+            steps++;
+          }
+          // Add the target point if the loop finished by reaching it
+          if (currentGeographicIndex === toPointIndex) {
+             geographicSegment.push(geographicRoute[toPointIndex]);
+          } else if (steps === geographicRouteLength) {
+              // If we looped through the entire route without reaching the toPointIndex, 
+              // it might indicate an issue or that the segment is the whole route (minus start point).
+              // In a true circular segment scenario, the loop should ideally stop when toPointIndex is the *next* point in the determined direction.
+              // For robustness, if the loop completes without hitting the target, let's re-evaluate or fallback.
+              console.warn('DEBUG: Geographic segment traversal failed to reach target index.');
+              // Fallback to simple slice if traversal fails
+              const sliceStartIndex = Math.min(fromPointIndex, toPointIndex);
+              const sliceEndIndex = Math.max(fromPointIndex, toPointIndex);
+              geographicSegment = geographicRoute.slice(sliceStartIndex, sliceEndIndex + 1);
+              if (direction === -1) { // Apply reverse if intended direction was backward
+                  geographicSegment.reverse();
+              }
+          }
+        }
+
+        // Return the segment of coordinates for drawing
+        return geographicSegment;
       };
 
       // Direct route (common color)
@@ -1137,53 +1358,109 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
 
       // --- TRANSFER LOGIC ---
       // No common color: find transfer station
-      // 1. Find nearest tram (use first color of startStation)
-      let tramToStartDistance = '', tramToStartDuration = '';
-      let tramToTransferDistance = '', tramToTransferDuration = '';
-      const nearestTram = await findNearestTram(startStation, startColors);
-      if (!nearestTram) {
-        alert('No suitable tram found with matching colors. Please check if any trams are available.');
+
+      // --- NEW TRANSFER LOGIC based on user's refined approach ---
+      // Find all potential transfer routes
+      const potentialTransferRoutes = findColorBasedTransferRoute(logicalRoutesData, stations, startStation, endStation);
+      console.log('DEBUG: Potential transfer routes found:', potentialTransferRoutes);
+
+      if (potentialTransferRoutes.length === 0) {
+        setIsSimulating(false);
+        alert('No suitable transfer station found. Please try a different route.');
         return;
       }
-      const tramColor = nearestTram.color;
-      const tramRoute = adminRoutes[tramColor.toLowerCase()];
-      if (!tramRoute || !Array.isArray(tramRoute) || tramRoute.length === 0) {
-        alert('No fixed route found for the nearest tram color.');
-        return;
-      }
-      // 2. Find all stations along the tram's route
-      const allStations = stations;
-      const routeStations = allStations.filter(station =>
-        tramRoute.some(point => {
-          const dist = Math.sqrt(Math.pow(point.lat - station.lat, 2) + Math.pow(point.lng - station.lng, 2));
-          return dist < 0.0005; // ~50m threshold
-        })
-      );
-      // 3. For each station along the tram's route (before destination), check if it shares a color with the destination
-      let transferStation = null;
-      for (const station of routeStations) {
-        if (station.id === startStation.id) continue;
-        const transferColors = station.colors || [];
-        if (transferColors.some(color => endColors.includes(color))) {
-          transferStation = station;
-          break;
+
+      // Evaluate each potential route and find the best one (minimum estimated total time)
+      let bestRoute = null;
+      let minTotalEstimatedTime = Infinity;
+
+      for (const route of potentialTransferRoutes) {
+        const { firstLeg, secondLeg, transferStation } = route;
+
+        // Estimate time for the first tram to reach the origin
+        const firstTram = tramPositions.find(tram => tram.color === firstLeg.color);
+        let tramToStartDurationMinutes = 0; // Default if no tram found or calculation fails
+        if (firstTram) {
+          // Calculate distance along the first leg's geographic route
+          const firstLegGeographicRoute = adminRoutes[firstLeg.color.toLowerCase()];
+          const distanceAlongRoute = await calculateDistanceAlongRoute(
+            firstLegGeographicRoute,
+            { lat: firstTram.lat, lng: firstTram.lng },
+            { lat: startStation.lat, lng: startStation.lng }
+          );
+
+          const tramSpeed = 20; // km/h (assuming average tram speed along the route)
+          tramToStartDurationMinutes = Math.round((distanceAlongRoute / tramSpeed) * 60);
+        }
+
+        // Estimate travel time for the first leg (Origin to Transfer)
+        const startToTransferDurationStr = await calculateRouteDuration(startStation, transferStation); // Using Google API or fallback
+        const startToTransferDurationMinutes = parseDurationToMinutes(startToTransferDurationStr);
+
+        // Estimate time for the second tram to reach the transfer station (waiting time)
+        const secondTram = tramPositions.find(tram => tram.color === secondLeg.color);
+        let tramToTransferDurationMinutes = 0; // Default
+        if (secondTram) {
+          // Calculate distance along the second leg's geographic route
+          const secondLegGeographicRoute = adminRoutes[secondLeg.color.toLowerCase()];
+          const distanceAlongRoute = await calculateDistanceAlongRoute(
+            secondLegGeographicRoute,
+            { lat: secondTram.lat, lng: secondTram.lng },
+            { lat: transferStation.lat, lng: transferStation.lng }
+          );
+
+          const tramSpeed = 20; // km/h
+          tramToTransferDurationMinutes = Math.round((distanceAlongRoute / tramSpeed) * 60);
+        }
+
+        // Estimate travel time for the second leg (Transfer to Destination)
+        const transferToEndDurationStr = await calculateRouteDuration(transferStation, endStation); // Using Google API or fallback
+        const transferToEndDurationMinutes = parseDurationToMinutes(transferToEndDurationStr);
+
+        // Calculate total estimated time for this route
+        const totalEstimatedTimeMinutes = tramToStartDurationMinutes + startToTransferDurationMinutes + tramToTransferDurationMinutes + transferToEndDurationMinutes;
+        console.log(`DEBUG: Route via ${transferStation.nameEn} (${firstLeg.color} then ${secondLeg.color}) - Estimated total time: ${totalEstimatedTimeMinutes} mins`);
+
+        // Check if this is the best route found so far
+        if (totalEstimatedTimeMinutes < minTotalEstimatedTime) {
+          minTotalEstimatedTime = totalEstimatedTimeMinutes;
+          bestRoute = route;
         }
       }
+
+      // If a best route was found, use it for simulation and display
+      if (!bestRoute) {
+         // This case should theoretically not be hit if potentialTransferRoutes was not empty,
+         // but as a safeguard:
+        setIsSimulating(false);
+        alert('Could not determine the best transfer route. Please try a different route.');
+        return;
+      }
+
+      // Use the details of the best route found
+      const { firstLeg, secondLeg, transferStation } = bestRoute;
+      const firstLegColor = firstLeg.color;
+      const secondLegColor = secondLeg.color;
+
       if (!transferStation) {
         setIsSimulating(false);
         alert('No suitable transfer station found. Please try a different route.');
         return;
       }
+
       // Add marker for transfer station
       await createMarker(transferStation, 'transfer');
-      // 4. Draw polyline from first tram to origin (always draw)
-      let firstLegSegment = await getRouteSegment(tramColor, startStation, transferStation);
+
+      // 4. Draw polyline from first tram to origin (always draw) // This comment might be slightly inaccurate now, it's origin to transfer
+      let firstLegSegment = await getRouteSegment(firstLegColor, startStation, transferStation);
       console.log('First leg segment:', firstLegSegment);
+
       if (!firstLegSegment || firstLegSegment.length < 2) {
         setIsSimulating(false);
         alert('No valid fixed route found for the first leg.');
         return;
       }
+
       // Draw first leg polyline
       const firstLegPolyline = new google.maps.Polyline({
         path: firstLegSegment,
@@ -1191,27 +1468,28 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
           icon: {
             path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
             scale: 4,
-            strokeColor: getColorHex(tramColor)
+            strokeColor: getColorHex(firstLegColor)
           },
           offset: '20%',
           repeat: '150px'
         }],
-        strokeColor: getColorHex(tramColor),
+        strokeColor: getColorHex(firstLegColor),
         strokeOpacity: 0.8,
         strokeWeight: 4,
         map: mapInstanceRef.current
       });
       polylinesRef.current.push(firstLegPolyline);
+
       // 5. Draw polyline from transfer station to destination (using a color shared with destination)
-      const transferColors = transferStation.colors || [];
-      const transferToDestColor = transferColors.find(color => endColors.includes(color));
-      let secondLegSegment = await getRouteSegment(transferToDestColor, transferStation, endStation);
+      let secondLegSegment = await getRouteSegment(secondLegColor, transferStation, endStation);
       console.log('Second leg segment:', secondLegSegment);
+
       if (!secondLegSegment || secondLegSegment.length < 2) {
         setIsSimulating(false);
         alert('No valid fixed route found for the second leg.');
         return;
       }
+
       // Draw second leg polyline
       const secondLegPolyline = new google.maps.Polyline({
         path: secondLegSegment,
@@ -1219,77 +1497,151 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
           icon: {
             path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
             scale: 4,
-            strokeColor: getColorHex(transferToDestColor)
+            strokeColor: getColorHex(secondLegColor)
           },
           offset: '20%',
           repeat: '150px'
         }],
-        strokeColor: getColorHex(transferToDestColor),
+        strokeColor: getColorHex(secondLegColor),
         strokeOpacity: 0.8,
         strokeWeight: 4,
         map: mapInstanceRef.current
       });
       polylinesRef.current.push(secondLegPolyline);
+
       // Remove all tram markers and only show the two simulation trams
       tramMarkersRef.current.forEach(marker => marker.setMap && marker.setMap(null));
       tramMarkersRef.current.clear();
-      // Show the first tram (for first leg)
-      const firstTram = await findNearestTram(startStation, [tramColor]);
+
+      // Show the first tram (for first leg) - find the nearest tram with the first leg color
+      const firstTram = await findNearestTram(startStation, [firstLegColor]);
       if (firstTram) {
         await createMarker({ lat: firstTram.lat, lng: firstTram.lng, nameEn: `Tram (${firstTram.color})`, color: firstTram.color }, 'tram');
       }
-      // Show the second tram (for second leg)
-      const secondTram = await findNearestTram(transferStation, [transferToDestColor]);
+
+      // Show the second tram (for second leg) - find the nearest tram with the second leg color
+      const secondTram = await findNearestTram(transferStation, [secondLegColor]);
       if (secondTram) {
         await createMarker({ lat: secondTram.lat, lng: secondTram.lng, nameEn: `Tram (${secondTram.color})`, color: secondTram.color }, 'tram');
       }
+
       // Set up for real-time update of both legs
       mainRouteSegmentRef.current = firstLegSegment;
-      mainRouteColorRef.current = tramColor;
+      mainRouteColorRef.current = firstLegColor;
       secondRouteSegmentRef.current = secondLegSegment;
-      secondRouteColorRef.current = transferToDestColor;
+      secondRouteColorRef.current = secondLegColor;
 
-      // Calculate durations for each segment
-      const firstLegDuration = await calculateRouteDuration(startStation, transferStation);
-      const secondLegDuration = await calculateRouteDuration(transferStation, endStation);
-      // For total distance: only sum firstLegSegment and secondLegSegment
-      const totalDistance = (parseFloat(calculateRouteDistance(firstLegSegment)) + parseFloat(calculateRouteDistance(secondLegSegment))).toFixed(1) + ' km';
-      // For total duration: sum all durations
-      const totalMins =
-        parseDurationToMinutes(tramToStartDuration) +
-        parseDurationToMinutes(firstLegDuration) +
-        parseDurationToMinutes(tramToTransferDuration) +
-        parseDurationToMinutes(secondLegDuration);
+      // --- TRAM TO ORIGIN CALCULATION --- // This section might need review based on the new logic
+      // Calculate total distance along the fixed route segment from first tram to origin
+      // This calculation needs to be based on the firstLegColor route
+      let tramToStartDistance = '';
+      let tramToStartDuration = '';
+      if (firstTram) {
+          // Use logicalRoutesData for station sequence to calculate tram-to-station distance by stops if needed
+          // However, the current estimation uses direct distance, which is simpler
+          // If you need distance by stops, you would use logicalRoutesData here.
+          // For now, keeping the direct distance estimation as it aligns with the current code pattern.
+           const firstLegRouteLogical = logicalRoutesData[firstLegColor.toLowerCase()]?.id || [];
+           if (firstLegRouteLogical.length > 0) {
+               // Note: findClosestPointIndex is for geographic coordinates, need station index on logical route
+               const tramStationIdx = firstLegRouteLogical.findIndex(id => String(id) === String(firstTram.stationId)); // Assuming tram has a stationId field if at a station
+               const originStationIdx = firstLegRouteLogical.findIndex(id => String(id) === String(startStation.id));
+
+               // Calculate distance/duration along the logical route based on number of stops
+               // This requires mapping station IDs to distances between consecutive stations, which you might not have directly.
+               // A simpler approach is to estimate based on direct distance or average speed between stops.
+               // Keeping the direct distance estimation for consistency with previous code.
+                const directDistance = google.maps.geometry.spherical.computeDistanceBetween(
+                    { lat: firstTram.lat, lng: firstTram.lng },
+                    { lat: startStation.lat, lng: startStation.lng }
+                ) / 1000; // in km
+                tramToStartDistance = directDistance.toFixed(1) + ' km';
+                const tramSpeed = 20; // km/h (assuming average tram speed)
+                const tramToStartDurationMinutes = Math.round((directDistance / tramSpeed) * 60);
+                tramToStartDuration = formatDurationFromMinutes(tramToStartDurationMinutes);
+           }
+       }
+
+      // --- TRAM TO TRANSFER CALCULATION --- // This is for the second tram reaching the transfer station
+      let tramToTransferDistance = '';
+      let tramToTransferDuration = '';
+       if (secondTram) {
+          // Use logicalRoutesData for station sequence if calculating by stops
+          // Keeping direct distance estimation for simplicity.
+          const secondLegRouteLogical = logicalRoutesData[secondLegColor.toLowerCase()]?.id || [];
+           if (secondLegRouteLogical.length > 0) {
+              const tramStationIdx = secondLegRouteLogical.findIndex(id => String(id) === String(secondTram.stationId)); // Assuming tram has a stationId
+              const transferStationIdx = secondLegRouteLogical.findIndex(id => String(id) === String(transferStation.id));
+
+              // Estimate based on direct distance
+              const directDistance = google.maps.geometry.spherical.computeDistanceBetween(
+                  { lat: secondTram.lat, lng: secondTram.lng },
+                  { lat: transferStation.lat, lng: transferStation.lng }
+              ) / 1000; // in km
+              tramToTransferDistance = directDistance.toFixed(1) + ' km';
+              const tramSpeed = 20; // km/h
+              const tramToTransferDurationMinutes = Math.round((directDistance / tramSpeed) * 60);
+              tramToTransferDuration = formatDurationFromMinutes(tramToTransferDurationMinutes);
+           }
+       }
+
+      // --- END TRAM TO TRANSFER CALCULATION ---
+
+      // --- ORIGIN TO TRANSFER CALCULATION ---
+      // Calculate distance and duration along the fixed route segment from origin to transfer
+      const startToTransferDistance = calculateRouteDistance(firstLegSegment);
+      const startToTransferDuration = await calculateRouteDuration(startStation, transferStation);
+      // --- END ORIGIN TO TRANSFER CALCULATION ---
+
+      // --- TRANSFER TO DESTINATION CALCULATION ---
+      // Calculate distance and duration along the fixed route segment from transfer to destination
+      const transferToEndDistance = calculateRouteDistance(secondLegSegment);
+      const transferToEndDuration = await calculateRouteDuration(transferStation, endStation);
+      // --- END TRANSFER TO DESTINATION CALCULATION ---
+
+      // For total distance: only sum startToTransfer and transferToEnd
+      const totalDistanceValue = (parseFloat(startToTransferDistance) + parseFloat(transferToEndDistance)).toFixed(1);
+      const totalDistance = totalDistanceValue + ' km';
+
+      // For total duration: sum all relevant durations
+      const totalMins = 
+        parseDurationToMinutes(tramToStartDuration) + // Time for the first tram to reach the origin station
+        parseDurationToMinutes(startToTransferDuration) + // Time from origin to transfer station
+        parseDurationToMinutes(tramToTransferDuration) + // Time for the second tram to reach the transfer station
+        parseDurationToMinutes(transferToEndDuration); // Time from transfer station to destination
+
       onRouteInfoUpdate({
         tramToStart: {
-          color: tramColor,
+          color: firstLegColor,
           distance: tramToStartDistance,
           duration: tramToStartDuration
         },
         startToTransfer: {
-          color: tramColor,
-          distance: calculateRouteDistance(firstLegSegment),
-          duration: firstLegDuration
+          color: firstLegColor,
+          distance: startToTransferDistance,
+          duration: startToTransferDuration
         },
         tramToTransfer: {
-          color: transferToDestColor,
+          color: secondLegColor,
           distance: tramToTransferDistance,
           duration: tramToTransferDuration
         },
         transferToEnd: {
-          color: transferToDestColor,
-          distance: calculateRouteDistance(secondLegSegment),
-          duration: secondLegDuration
+          color: secondLegColor,
+          distance: transferToEndDistance,
+          duration: transferToEndDuration
         },
         transferStation: transferStation.nameEn,
         total: {
           label: 'Origin to Transfer to Destination',
           distance: totalDistance,
-          duration: totalMins + ' mins'
+          duration: formatDurationFromMinutes(totalMins) // Use formatDurationFromMinutes for the total
         }
       });
-      alert(`Transfer required at ${transferStation.nameEn}. Please wait for a tram with colors: ${transferToDestColor}`);
+
+      alert(`Transfer required at ${transferStation.nameEn}. Please wait for a tram with colors: ${secondLegColor}`);
       return;
+
     } catch (error) {
       setIsSimulating(false);
       console.error('Error fetching route information:', error);
