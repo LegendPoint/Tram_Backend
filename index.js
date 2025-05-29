@@ -1,29 +1,28 @@
 import express from 'express';
 import cors from 'cors';
-import helmet from 'helmet';
-import { config } from 'dotenv';
+import dotenv from 'dotenv';
 import authRoutes from './routes/authRoutes.js';
+import stationRoutes from './routes/stationRoutes.js';
 
 // Load environment variables
-config();
+dotenv.config();
 
 const app = express();
+const port = process.env.PORT || 5000;
 
 // Middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 app.use(cors());
-app.use(helmet());
+app.use(express.json());
 
 // Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/stations', stationRoutes);
 
 // Home route
 app.get('/', (req, res) => {
   res.send('Travel Simulation API is running...');
 });
 
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`Server running in development mode on port ${PORT}`);
+app.listen(port, () => {
+  console.log(`Server is running on port ${port}`);
 });

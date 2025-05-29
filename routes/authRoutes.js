@@ -1,23 +1,28 @@
 import express from 'express';
-import { login, logout } from '../controllers/authController.js';
-import { protect } from '../middleware/authMiddleware.js';
+import { getAuth } from 'firebase-admin/auth';
 
 const router = express.Router();
 
-router.post('/login', (req, res) => {
-  console.log('Login route hit', req.body);
-  login(req, res);
+// Login route
+router.post('/login', async (req, res) => {
+  try {
+    const { idToken } = req.body;
+    const decodedToken = await getAuth().verifyIdToken(idToken);
+    res.json({ uid: decodedToken.uid });
+  } catch (error) {
+    res.status(401).json({ error: 'Authentication failed' });
+  }
 });
 
-router.post('/logout', (req, res) => {
-  logout(req, res);
+// Verify token route
+router.post('/verify', async (req, res) => {
+  try {
+    const { idToken } = req.body;
+    const decodedToken = await getAuth().verifyIdToken(idToken);
+    res.json({ uid: decodedToken.uid });
+  } catch (error) {
+    res.status(401).json({ error: 'Token verification failed' });
+  }
 });
 
-router.get('/profile', protect, (req, res) => {
-  res.status(200).json({
-    message: 'Protected route accessed successfully',
-    user: req.user
-  });
-});
-
-export { router as default };
+export default router; 
