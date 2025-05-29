@@ -240,7 +240,7 @@ function App() {
                   {routeInfo.startToTransfer?.distance && (
                     <div className="route-info-section">
                       <h3>
-                        {routeInfo.startToTransfer.color && (
+                        {routeInfo.startToTransfer.color && routeInfo.startToTransfer.color !== 'purple' && (
                           <span style={{
                             display: 'inline-block',
                             width: 16,
@@ -252,14 +252,14 @@ function App() {
                             verticalAlign: 'middle'
                           }}></span>
                         )}
-                        {routeInfo.startToTransfer.color ? `${capitalize(routeInfo.startToTransfer.color)} Tram: Origin to Transfer Station` : 'Origin to Transfer Station'}
+                        {routeInfo.startToTransfer.label || (routeInfo.startToTransfer.color ? `${capitalize(routeInfo.startToTransfer.color)} Tram: Origin to Transfer Station` : 'Origin to Transfer Station')}
                       </h3>
                       <p>Distance: {routeInfo.startToTransfer.distance}</p>
                       <p>Duration: {routeInfo.startToTransfer.duration}</p>
                       {routeInfo.transferStation && <p>Transfer Station: <b>{routeInfo.transferStation}</b></p>}
                     </div>
                   )}
-                  {/* Transfer: Tram to Transfer Station */}
+                  {/* Tram to Transfer Station (for walking transfer) */}
                   {routeInfo.tramToTransfer?.distance && (
                     <div className="route-info-section">
                       <h3>
@@ -275,10 +275,10 @@ function App() {
                             verticalAlign: 'middle'
                           }}></span>
                         )}
-                        {routeInfo.tramToTransfer.color ? `${capitalize(routeInfo.tramToTransfer.color)} Tram to Transfer Station` : 'Tram to Transfer Station'}
+                        Tram to Transfer Station
                       </h3>
                       <p>Distance: {routeInfo.tramToTransfer.distance}</p>
-                      <p>Duration: {routeInfo.tramToTransfer.duration}</p>
+                      <p>Waiting time for tram: {routeInfo.tramToTransfer.duration}</p>
                     </div>
                   )}
                   {/* Transfer: Transfer Station to Destination */}
@@ -328,7 +328,7 @@ function App() {
                   {/* Total Journey */}
                   {routeInfo.total?.distance && (
                     <div className="route-info-section total">
-                      <h3>{routeInfo.total.label || 'Total Journey'}</h3>
+                      <h3>Total Journey</h3>
                       <p>Total Distance: {routeInfo.total.distance}</p>
                       <p>Total Duration: {routeInfo.total.duration}</p>
                     </div>

@@ -4,7 +4,8 @@ import routeEditorService from '../services/routeEditorService';
 const COLORS = {
   red: '#F44336',
   blue: '#2196F3',
-  green: '#4CAF50'
+  green: '#4CAF50',
+  yellow: '#FFEB3B'
 };
 
 const MergedRouteEditor = () => {
@@ -199,6 +200,7 @@ const MergedRouteEditor = () => {
           <option value="red">Red Route</option>
           <option value="blue">Blue Route</option>
           <option value="green">Green Route</option>
+          <option value="yellow">Yellow Route</option>
         </select>
         <button
           onClick={handleSave}
