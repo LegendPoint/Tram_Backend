@@ -103,6 +103,8 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
            lng <= mahidolBoundaries.east;
   };
 
+  const [hasReachedOrigin, setHasReachedOrigin] = useState(false);
+
   useEffect(() => {
     const initializeMap = () => {
       if (!window.google || !mapRef.current) return;
@@ -798,22 +800,31 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
     const closestRoutePoint = routeSegment[tramIdx];
     const THRESHOLD = 0.0003; // ~30 meters
 
-    // End simulation if tram is at/near the destination
-    const destPoint = routeSegment[routeSegment.length - 1];
-    const distToDest = Math.sqrt(Math.pow(tramPoint.lat - destPoint.lat, 2) + Math.pow(tramPoint.lng - destPoint.lng, 2));
-    if (distToDest < 0.0002) { // ~20 meters
-      setIsSimulating(false);
-      alert('Tram has reached the destination!');
-      return;
-    }
-
     // Find the origin station (first point in the route segment)
     const originPoint = routeSegment[0];
-    // Calculate distance from tram to origin
     const distToOrigin = Math.sqrt(Math.pow(tramPoint.lat - originPoint.lat, 2) + Math.pow(tramPoint.lng - originPoint.lng, 2));
 
-    if (distToOrigin > THRESHOLD) {
-      // Tram has NOT reached the origin: show full route in color, no gray segment
+    // Step 1: Wait for tram to reach the origin
+    if (!hasReachedOrigin && distToOrigin < 0.0002) {
+      setHasReachedOrigin(true);
+      // Optionally, alert('Tram has reached the origin station!');
+    }
+
+    // Step 2: Only allow simulation to end if tram has reached the origin first
+    if (hasReachedOrigin) {
+      // End simulation if tram is at/near the destination
+      const destPoint = routeSegment[routeSegment.length - 1];
+      const distToDest = Math.sqrt(Math.pow(tramPoint.lat - destPoint.lat, 2) + Math.pow(tramPoint.lng - destPoint.lng, 2));
+      if (distToDest < 0.0002) { // ~20 meters
+        setIsSimulating(false);
+        setHasReachedOrigin(false); // reset for next simulation
+        alert('Tram has reached the destination!');
+        return;
+      }
+    }
+
+    // Tram has NOT reached the origin: show full route in color, no gray segment
+    if (!hasReachedOrigin) {
       const remainingPolyline = new google.maps.Polyline({
         path: routeSegment,
         icons: [{
@@ -1068,15 +1079,45 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
         return;
       }
 
-      // Check if stations are too close (within 40 meters)
+      // Check if stations are too close (within 200 meters)
       const distance = google.maps.geometry.spherical.computeDistanceBetween(
         { lat: startStation.lat, lng: startStation.lng },
         { lat: endStation.lat, lng: endStation.lng }
       );
       
-      if (distance <= 40) { // 40 meters
+      if (distance <= 150) { // 150 meters
         setIsSimulating(false);
-        alert('Origin and destination are too close (within 40 meters). Please select locations that are further apart.');
+        alert('Origin and destination are too close (within 150 meters). Please select locations that are further apart.');
+        // Restore tram markers
+        updateTramMarkers(tramPositions);
+        // Restore event markers
+        eventService.getAllEvents(async (eventsData) => {
+          setEvents(eventsData);
+          eventMarkersRef.current.forEach(marker => marker.setMap(null));
+          eventMarkersRef.current = [];
+          const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
+          eventsData.forEach(event => {
+            if (event.location) {
+              const eventEndDate = new Date(event.endDate);
+              const currentDate = new Date();
+              if (currentDate <= eventEndDate) {
+                const markerView = new google.maps.marker.PinElement({
+                  background: "#9C27B0",
+                  borderColor: "#ffffff",
+                  glyphColor: "#ffffff",
+                  scale: 1.2
+                });
+                const marker = new AdvancedMarkerElement({
+                  map: mapInstanceRef.current,
+                  position: { lat: event.location.lat, lng: event.location.lng },
+                  title: event.name,
+                  content: markerView.element
+                });
+                eventMarkersRef.current.push(marker);
+              }
+            }
+          });
+        });
         return;
       }
 
@@ -1302,16 +1343,14 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
 
       // --- NEW TRANSFER LOGIC based on user's refined approach ---
       // For each transfer station candidate, always check walking first
-      const preferredTransferRoutes = [];
+      let preferredTransferRoutes = [];
+      let foundTransfer = false;
       for (const originColor of startColors) {
         const polyline = adminRoutes[originColor.toLowerCase()];
         const logicalRoute = logicalRoutesData[originColor]?.id || [];
         if (!polyline || polyline.length === 0 || logicalRoute.length === 0) continue;
-        // Find the closest point on the polyline to the origin station
         const originIdx = await findClosestPointIndex(polyline, { lat: startStation.lat, lng: startStation.lng });
-        // Walk along the polyline from originIdx forward
-        let found = false;
-        for (let i = 1; i < polyline.length && !found; i++) {
+        for (let i = 1; i < polyline.length && !foundTransfer; i++) {
           const idx = (originIdx + i) % polyline.length;
           const point = polyline[idx];
           for (const station of stations) {
@@ -1319,7 +1358,8 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
               new google.maps.LatLng(point.lat, point.lng),
               new google.maps.LatLng(station.lat, station.lng)
             );
-            if (dist <= 10) { // 10 meters
+            if (dist <= 25) {
+              console.log('Encountered station:', station.nameEn, 'at polyline index', idx);
               if (String(station.id) === String(startStation.id) || String(station.id) === String(endStation.id)) continue;
               const transferColors = station.colors || [];
               const sharedColorWithOrigin = transferColors.find(color => startColors.includes(color));
@@ -1328,17 +1368,15 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
                 // Always check walking first
                 const walkingResult = await getWalkingRouteAndDuration(startStation, station);
                 if (walkingResult && walkingResult.durationMinutes <= 5) {
-                  // Use walking as transfer (prefer walking)
                   preferredTransferRoutes.push({
                     firstLeg: { color: originColor, from: startStation, to: station, mode: 'walk' },
                     secondLeg: { color: sharedColorWithDestination, from: station, to: endStation },
                     transferStation: station,
                     walkingPolyline: walkingResult.polyline
                   });
-                  found = true;
+                  foundTransfer = true;
                   break;
                 } else if (sharedColorWithOrigin) {
-                  // Only use tram if walking is not available or > 5 min
                   const routeB = logicalRoutesData[sharedColorWithDestination]?.id || [];
                   if (routeB.some(id => String(id) === String(endStation.id))) {
                     preferredTransferRoutes.push({
@@ -1347,12 +1385,29 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
                       transferStation: station,
                       walkingPolyline: null
                     });
-                    found = true;
+                    foundTransfer = true;
                     break;
                   }
                 }
               }
             }
+          }
+        }
+      }
+      // If no transfer found, fallback to Tram Station as before
+      if (preferredTransferRoutes.length === 0) {
+        const tramStation = stations.find(s => s.nameEn === 'Tram Station');
+        if (tramStation && tramStation.id !== startStation.id && tramStation.id !== endStation.id) {
+          const transferColors = tramStation.colors || [];
+          const sharedColorWithOrigin = transferColors.find(color => startColors.includes(color));
+          const sharedColorWithDestination = transferColors.find(color => endColors.includes(color));
+          if (sharedColorWithOrigin && sharedColorWithDestination) {
+            preferredTransferRoutes.push({
+              firstLeg: { color: sharedColorWithOrigin, from: startStation, to: tramStation, mode: 'tram' },
+              secondLeg: { color: sharedColorWithDestination, from: tramStation, to: endStation },
+              transferStation: tramStation,
+              walkingPolyline: null
+            });
           }
         }
       }
@@ -1642,20 +1697,20 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
         const tramToStartDistanceValue = calculateDistanceForward(firstLegRoute, tramIdx, originIdx);
         tramToStartDistance = tramToStartDistanceValue.toFixed(1) + ' km';
         const tramToStartDurationMinutes = Math.round((tramToStartDistanceValue / tramSpeed) * 60);
-        tramToStartDuration = formatDurationFromMinutes(tramToStartDurationMinutes);
-      }
+                tramToStartDuration = formatDurationFromMinutes(tramToStartDurationMinutes);
+           }
       // --- TRAM TO TRANSFER CALCULATION --- // This is for the second tram reaching the transfer station
       let tramToTransferDistance = '';
       let tramToTransferDuration = '';
-      if (secondTram) {
+       if (secondTram) {
         const secondLegRoute = adminRoutes[secondLegColor.toLowerCase()];
         const tramIdx = await findClosestPointIndex(secondLegRoute, { lat: secondTram.lat, lng: secondTram.lng });
         const transferIdx = await findClosestPointIndex(secondLegRoute, { lat: transferStation.lat, lng: transferStation.lng });
         const tramToTransferDistanceValue = calculateDistanceForward(secondLegRoute, tramIdx, transferIdx);
         tramToTransferDistance = tramToTransferDistanceValue.toFixed(1) + ' km';
         const tramToTransferDurationMinutes = Math.round((tramToTransferDistanceValue / tramSpeed) * 60);
-        tramToTransferDuration = formatDurationFromMinutes(tramToTransferDurationMinutes);
-      }
+              tramToTransferDuration = formatDurationFromMinutes(tramToTransferDurationMinutes);
+           }
       // ... existing code ...
 
       // --- ORIGIN TO TRANSFER CALCULATION ---
