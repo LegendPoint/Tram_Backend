@@ -1079,12 +1079,20 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
         return;
       }
 
-      // Check if stations are too close (within 200 meters)
+      // Check if stations are too close (within 150 meters)
+      if (
+        typeof startStation.lat !== 'number' || typeof startStation.lng !== 'number' ||
+        typeof endStation.lat !== 'number' || typeof endStation.lng !== 'number'
+      ) {
+        setIsSimulating(false);
+        console.error('Invalid coordinates:', startStation, endStation);
+        alert('One of the selected locations is missing coordinates. Please try again.');
+        return;
+      }
       const distance = google.maps.geometry.spherical.computeDistanceBetween(
         { lat: startStation.lat, lng: startStation.lng },
         { lat: endStation.lat, lng: endStation.lng }
       );
-      
       if (distance <= 150) { // 150 meters
         setIsSimulating(false);
         alert('Origin and destination are too close (within 150 meters). Please select locations that are further apart.');
