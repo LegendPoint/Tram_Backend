@@ -1064,6 +1064,7 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
     onRouteInfoUpdate({});
     let firstTram = null;
     let secondTram = null;
+    let walkingToStationInfo = null;
     try {
       if (!startStation || !endStation) {
         setIsSimulating(false);
@@ -1138,50 +1139,74 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
       console.log('Created marker for destination');
 
       // If startStation is a current location (has lat/lng but no id)
-      if (startStation.lat && startStation.lng && !startStation.id) {
+      if (startStation.lat && startStation.lng && (startStation.id === 'current' || !startStation.id)) {
         const allStations = stations;
-        const nearestStation = await findNearestStationWithCommonColors(startStation, endStation, allStations);
-        
+        // Find the nearest station (regardless of color)
+        let nearestStation = null;
+        let minDistance = Infinity;
+        for (const station of allStations) {
+          const distance = google.maps.geometry.spherical.computeDistanceBetween(
+            { lat: startStation.lat, lng: startStation.lng },
+            { lat: station.lat, lng: station.lng }
+          );
+          if (distance < minDistance) {
+            minDistance = distance;
+            nearestStation = station;
+          }
+        }
         if (!nearestStation) {
-          alert('No suitable station found with common colors to destination.');
+          alert('No tram stations found.');
           return;
         }
-
-        // Draw walking path to nearest station
-        const walkingPolyline = new google.maps.Polyline({
-          path: nearestStation.walkingPath,
-          strokeColor: '#FF9800', // Orange color for walking path
-          strokeOpacity: 0.8,
-          strokeWeight: 3,
-          icons: [{
-            icon: {
-              path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
-              scale: 3,
-              strokeColor: '#FF9800'
+        // Draw walking path to nearest station using Directions API
+        const { DirectionsService } = await google.maps.importLibrary("routes");
+        const directionsService = new DirectionsService();
+        const walkingResult = await new Promise((resolve, reject) => {
+          directionsService.route(
+            {
+              origin: { lat: startStation.lat, lng: startStation.lng },
+              destination: { lat: nearestStation.lat, lng: nearestStation.lng },
+              travelMode: google.maps.TravelMode.WALKING,
             },
-            offset: '20%',
-            repeat: '150px'
-          }],
-          map: mapInstanceRef.current
+            (result, status) => {
+              if (status === "OK") {
+                resolve(result);
+              } else {
+                resolve(null);
+              }
+            }
+          );
         });
-        polylinesRef.current.push(walkingPolyline);
-
-        // Create markers for current location and nearest station
-        await createMarker(startStation, 'current');
-        await createMarker(nearestStation, 'nearest');
-        await createMarker(endStation, 'destination');
-
-        // Update route info with walking segment
-        onRouteInfoUpdate({
-          walkingToStation: {
+        if (walkingResult) {
+          const overviewPath = walkingResult.routes[0].overview_path.map(latlng => ({ lat: latlng.lat(), lng: latlng.lng() }));
+          const walkingPolyline = new google.maps.Polyline({
+            path: overviewPath,
+            strokeColor: '#FF9800',
+            strokeOpacity: 0.8,
+            strokeWeight: 3,
+            icons: [{
+              icon: {
+                path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
+                scale: 3,
+                strokeColor: '#FF9800'
+              },
+              offset: '20%',
+              repeat: '150px'
+            }],
+            map: mapInstanceRef.current
+          });
+          polylinesRef.current.push(walkingPolyline);
+          await createMarker(startStation, 'current');
+          await createMarker(nearestStation, 'nearest');
+          await createMarker(endStation, 'destination');
+          walkingToStationInfo = {
             color: 'walking',
-            distance: nearestStation.walkingDistance,
-            duration: nearestStation.walkingDuration
-          },
-          // ... rest of the route info
-        });
-
-        // Continue with the route from nearest station to destination
+            distance: walkingResult.routes[0].legs[0].distance.text,
+            duration: walkingResult.routes[0].legs[0].duration.text
+          };
+          onRouteInfoUpdate({ walkingToStation: walkingToStationInfo });
+        }
+        // Continue with the route from nearest station to destination (including transfer logic)
         startStation = nearestStation;
       }
 
@@ -1797,45 +1822,69 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
       let firstLegDistance = startToTransferDistance;
       let firstLegDuration = startToTransferDuration;
 
-      onRouteInfoUpdate({
-        tramToStart: firstLeg.mode === 'tram' ? {
-          color: firstLegColor,
-          distance: tramToStartDistance,
-          duration: tramToStartDuration,
-          label: firstLegColor.charAt(0).toUpperCase() + firstLegColor.slice(1) + ' Tram to Origin Station'
-        } : undefined,
-        startToTransfer: {
-          color: firstLegColorLabel,
-          label: firstLegLabel,
-          distance: firstLegDistance,
-          duration: firstLegDuration
-        },
-        tramToTransfer: firstLeg.mode === 'walk' ? {
-          color: secondLegColor,
-          distance: tramToTransferDistanceStr,
-          duration: tramArrivalTimeStr,
-          label: secondLegColor.charAt(0).toUpperCase() + secondLegColor.slice(1) + ' Tram to Transfer Station'
-        } : {
-          color: secondLegColor,
-          distance: tramToTransferDistanceKm.toFixed(2) + ' km',
-          duration: formatDurationFromMinutes(tramToTransferDurationMinutes),
-          label: secondLegColor.charAt(0).toUpperCase() + secondLegColor.slice(1) + ' Tram to Transfer Station'
-        },
-        transferToEnd: {
-          color: secondLegColor,
-          distance: transferToEndDistance,
-          duration: formatDurationFromMinutes(transferToEndDurationMinutes)
-        },
-        transferStation: transferStation.nameEn,
-        total: {
-          label: totalLabel,
-          distance: totalDistance,
-          duration: formatDurationFromMinutes(totalMins)
-        }
-      });
-
-      alert(`Transfer required at ${transferStation.nameEn}. Please wait for a tram with colors: ${secondLegColor}`);
-      return;
+      if (typeof selectedColor !== 'undefined') {
+        // For direct route:
+        onRouteInfoUpdate({
+          ...(walkingToStationInfo ? { walkingToStation: walkingToStationInfo } : {}),
+          tramToStart: {
+            color: selectedColor,
+            distance: tramToStartDistance,
+            duration: tramToStartDuration
+          },
+          startToEnd: {
+            color: selectedColor,
+            distance: startToEndDistance,
+            duration: startToEndDuration
+          },
+          total: {
+            label: 'Origin to Destination',
+            distance: startToEndDistance,
+            duration: totalMins + ' mins'
+          }
+        });
+        return;
+      } else {
+        // For transfer/complex route:
+        onRouteInfoUpdate({
+          ...(walkingToStationInfo ? { walkingToStation: walkingToStationInfo } : {}),
+          tramToStart: firstLeg.mode === 'tram' ? {
+            color: firstLegColor,
+            distance: tramToStartDistance,
+            duration: tramToStartDuration,
+            label: firstLegColor.charAt(0).toUpperCase() + firstLegColor.slice(1) + ' Tram to Origin Station'
+          } : undefined,
+          startToTransfer: {
+            color: firstLegColorLabel,
+            label: firstLegLabel,
+            distance: firstLegDistance,
+            duration: firstLegDuration
+          },
+          tramToTransfer: firstLeg.mode === 'walk' ? {
+            color: secondLegColor,
+            distance: tramToTransferDistanceStr,
+            duration: tramArrivalTimeStr,
+            label: secondLegColor.charAt(0).toUpperCase() + secondLegColor.slice(1) + ' Tram to Transfer Station'
+          } : {
+            color: secondLegColor,
+            distance: tramToTransferDistanceKm.toFixed(2) + ' km',
+            duration: formatDurationFromMinutes(tramToTransferDurationMinutes),
+            label: secondLegColor.charAt(0).toUpperCase() + secondLegColor.slice(1) + ' Tram to Transfer Station'
+          },
+          transferToEnd: {
+            color: secondLegColor,
+            distance: transferToEndDistance,
+            duration: formatDurationFromMinutes(transferToEndDurationMinutes)
+          },
+          transferStation: transferStation.nameEn,
+          total: {
+            label: totalLabel,
+            distance: totalDistance,
+            duration: formatDurationFromMinutes(totalMins)
+          }
+        });
+        alert(`Transfer required at ${transferStation.nameEn}. Please wait for a tram with colors: ${secondLegColor}`);
+        return;
+      }
 
     } catch (error) {
       setIsSimulating(false);
