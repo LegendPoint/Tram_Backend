@@ -275,7 +275,7 @@ function App() {
                             verticalAlign: 'middle'
                           }}></span>
                         )}
-                        Tram to Transfer Station
+                        {routeInfo.tramToTransfer.color ? `${capitalize(routeInfo.tramToTransfer.color)} Tram to Transfer Station` : 'Tram to Transfer Station'}
                       </h3>
                       <p>Distance: {routeInfo.tramToTransfer.distance}</p>
                       <p>Waiting time for tram: {routeInfo.tramToTransfer.duration}</p>
