@@ -771,11 +771,13 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
     }
   };
 
-  // Helper to parse duration string (e.g., '1 hr 5 min', '28 min') to minutes
+  // Helper to parse duration string (e.g., '1 hr 5 min', '28 min', '3 hours 56 mins') to minutes
   const parseDurationToMinutes = (durationStr) => {
     let total = 0;
-    const hrMatch = durationStr.match(/(\d+)\s*hr/);
-    const minMatch = durationStr.match(/(\d+)\s*min/);
+    if (!durationStr) return 0;
+    // Match all variations of hour/minute
+    const hrMatch = durationStr.match(/(\d+)\s*(hr|hrs|hour|hours)/i);
+    const minMatch = durationStr.match(/(\d+)\s*(min|mins|minute|minutes)/i);
     if (hrMatch) total += parseInt(hrMatch[1], 10) * 60;
     if (minMatch) total += parseInt(minMatch[1], 10);
     return total;
@@ -2005,6 +2007,16 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
 
       if (typeof selectedColor !== 'undefined') {
         // For direct route:
+        // Calculate total distance and duration including walkingToStation if present
+        let totalDistanceValue = parseFloat(startToEndDistance);
+        let totalMins = parseDurationToMinutes(tramToStartDuration) + startToEndDurationMinutes;
+        if (walkingToStationInfo && walkingToStationInfo.distance && walkingToStationInfo.duration) {
+          // Add walking distance and duration
+          const walkDist = parseFloat(walkingToStationInfo.distance);
+          const walkMins = parseDurationToMinutes(walkingToStationInfo.duration);
+          if (!isNaN(walkDist)) totalDistanceValue += walkDist;
+          if (!isNaN(walkMins)) totalMins += walkMins;
+        }
         onRouteInfoUpdate({
           ...(walkingToStationInfo ? { walkingToStation: walkingToStationInfo } : {}),
           tramToStart: {
@@ -2019,13 +2031,34 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
           },
           total: {
             label: 'Origin to Destination',
-            distance: startToEndDistance,
+            distance: totalDistanceValue.toFixed(2) + ' km',
             duration: totalMins + ' mins'
           }
         });
         return;
       } else {
         // For transfer/complex route:
+        // Calculate total distance and duration including walkingToStation if present
+        let totalDistanceValue = (parseFloat(startToTransferDistance) + parseFloat(transferToEndDistance));
+        let totalMins = 0;
+        if (firstLeg.mode === 'walk') {
+          totalMins =
+            (walkingPolyline?.durationMinutes || 0) + // walking
+            tramArrivalTimeMins + // waiting for tram
+            transferToEndDurationMinutes; // tram ride
+        } else {
+          totalMins =
+            parseDurationToMinutes(tramToStartDuration) + // Time for the first tram to reach the origin station
+            parseDurationToMinutes(startToTransferDuration) + // Time from origin to transfer station
+            parseDurationToMinutes(tramToTransferDuration) + // Time for the second tram to reach the transfer station
+            transferToEndDurationMinutes; // Time from transfer station to destination
+        }
+        if (walkingToStationInfo && walkingToStationInfo.distance && walkingToStationInfo.duration) {
+          const walkDist = parseFloat(walkingToStationInfo.distance);
+          const walkMins = parseDurationToMinutes(walkingToStationInfo.duration);
+          if (!isNaN(walkDist)) totalDistanceValue += walkDist;
+          if (!isNaN(walkMins)) totalMins += walkMins;
+        }
         onRouteInfoUpdate({
           ...(walkingToStationInfo ? { walkingToStation: walkingToStationInfo } : {}),
           tramToStart: firstLeg.mode === 'tram' ? {
@@ -2059,7 +2092,7 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
           transferStation: transferStation.nameEn,
           total: {
             label: totalLabel,
-            distance: totalDistance,
+            distance: totalDistanceValue.toFixed(2) + ' km',
             duration: formatDurationFromMinutes(totalMins)
           }
         });
