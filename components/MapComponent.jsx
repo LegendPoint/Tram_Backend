@@ -283,42 +283,52 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
     const unsubscribe = eventService.getAllEvents(async (eventsData) => {
       try {
         setEvents(eventsData);
+        // Update status to 'expired' for events that have passed their endDate
+        const now = new Date();
+        for (const event of eventsData) {
+          const endDate = new Date(event.endDate);
+          if (event.status === "active" && now > endDate) {
+            await eventService.updateEvent(event.id, { status: "expired" });
+          }
+        }
+        // Only show non-expired events on the map
+        const activeEvents = eventsData.filter(event => {
+          const endDate = new Date(event.endDate);
+          return event.status !== "expired" && now <= endDate;
+        });
         eventMarkersRef.current.forEach(marker => marker.setMap(null));
         eventMarkersRef.current = [];
         const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
-        eventsData.forEach(event => {
+        activeEvents.forEach(event => {
           if (event.location) {
-            const eventEndDate = new Date(event.endDate);
-            const currentDate = new Date();
-            if (currentDate <= eventEndDate) {
-              const markerView = new google.maps.marker.PinElement({
-                background: "#9C27B0",
-                borderColor: "#ffffff",
-                glyphColor: "#ffffff",
-                scale: 1.2
+            const markerView = new google.maps.marker.PinElement({
+              background: "#9C27B0",
+              borderColor: "#ffffff",
+              glyphColor: "#ffffff",
+              scale: 1.2
+            });
+            const marker = new AdvancedMarkerElement({
+              map: mapInstanceRef.current,
+              position: { lat: event.location.lat, lng: event.location.lng },
+              title: event.name,
+              content: markerView.element
+            });
+            marker.addListener('gmp-click', () => {
+              const infoWindow = new google.maps.InfoWindow({
+                content: `
+                  <div style="padding: 10px; max-width: 250px;">
+                    <h3>${event.name}</h3>
+                    ${event.imageUrl ? `<img src="${event.imageUrl}" alt="Event" style="width:100%;max-height:120px;object-fit:cover;margin-bottom:8px;" />` : ''}
+                    <p>${event.description}</p>
+                    <p><strong>Start:</strong> ${new Date(event.startDate).toLocaleString()}</p>
+                    <p><strong>End:</strong> ${new Date(event.endDate).toLocaleString()}</p>
+                    <p><strong>Status:</strong> Active</p>
+                  </div>
+                `
               });
-              const marker = new AdvancedMarkerElement({
-                map: mapInstanceRef.current,
-                position: { lat: event.location.lat, lng: event.location.lng },
-                title: event.name,
-                content: markerView.element
-              });
-              marker.addListener('gmp-click', () => {
-                const infoWindow = new google.maps.InfoWindow({
-                  content: `
-                    <div style="padding: 10px; max-width: 250px;">
-                      <h3>${event.name}</h3>
-                      ${event.imageUrl ? `<img src="${event.imageUrl}" alt="Event" style="width:100%;max-height:120px;object-fit:cover;margin-bottom:8px;" />` : ''}
-                      <p>${event.description}</p>
-                      <p><strong>Start:</strong> ${new Date(event.startDate).toLocaleString()}</p>
-                      <p><strong>End:</strong> ${new Date(event.endDate).toLocaleString()}</p>
-                    </div>
-                  `
-                });
-                infoWindow.open(mapInstanceRef.current, marker);
-              });
-              eventMarkersRef.current.push(marker);
-            }
+              infoWindow.open(mapInstanceRef.current, marker);
+            });
+            eventMarkersRef.current.push(marker);
           }
         });
       } catch (error) {
