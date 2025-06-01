@@ -63,12 +63,6 @@ const walkingDirectionsCache = new Map();
 const tramRouteInfoCache = new Map();
 const transferRouteInfoCache = new Map();
 
-// Add a cache for walking directions
-const walkingDirectionsCache = new Map();
-// Add a cache for tram/transfer route info
-const tramRouteInfoCache = new Map();
-const transferRouteInfoCache = new Map();
-
 const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
@@ -171,50 +165,6 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
 
       const map = new window.google.maps.Map(mapRef.current, mapOptions);
       mapInstanceRef.current = map;
-
-      // Add Pan to Current Location button
-      const locationButton = document.createElement("button");
-      locationButton.textContent = "Pan to Current Location";
-      locationButton.classList.add("custom-map-control-button");
-      map.controls[window.google.maps.ControlPosition.TOP_CENTER].push(locationButton);
-      const infoWindow = new window.google.maps.InfoWindow();
-      locationButton.addEventListener("click", () => {
-        if (navigator.geolocation) {
-          navigator.geolocation.getCurrentPosition(
-            (position) => {
-              const pos = {
-                lat: position.coords.latitude,
-                lng: position.coords.longitude,
-              };
-              infoWindow.setPosition(pos);
-              infoWindow.setContent("Location found.");
-              infoWindow.open(map);
-              map.setCenter(pos);
-              // Optionally: Add a marker at the current location
-              new window.google.maps.Marker({
-                position: pos,
-                map: map,
-                title: "Your Location"
-              });
-            },
-            () => {
-              handleLocationError(true, infoWindow, map.getCenter());
-            }
-          );
-        } else {
-          // Browser doesn't support Geolocation
-          handleLocationError(false, infoWindow, map.getCenter());
-        }
-      });
-      function handleLocationError(browserHasGeolocation, infoWindow, pos) {
-        infoWindow.setPosition(pos);
-        infoWindow.setContent(
-          browserHasGeolocation
-            ? "Error: The Geolocation service failed."
-            : "Error: Your browser doesn't support geolocation."
-        );
-        infoWindow.open(map);
-      }
 
       const loadingDiv = document.createElement('div');
       loadingDiv.className = 'map-loading';
@@ -781,13 +731,8 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
   };
 
   // Helper to parse duration string (e.g., '1 hr 5 min', '28 min', '3 hours 56 mins') to minutes
-  // Helper to parse duration string (e.g., '1 hr 5 min', '28 min', '3 hours 56 mins') to minutes
   const parseDurationToMinutes = (durationStr) => {
     let total = 0;
-    if (!durationStr) return 0;
-    // Match all variations of hour/minute
-    const hrMatch = durationStr.match(/(\d+)\s*(hr|hrs|hour|hours)/i);
-    const minMatch = durationStr.match(/(\d+)\s*(min|mins|minute|minutes)/i);
     if (!durationStr) return 0;
     // Match all variations of hour/minute
     const hrMatch = durationStr.match(/(\d+)\s*(hr|hrs|hour|hours)/i);
@@ -1152,7 +1097,6 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
     let firstTram = null;
     let secondTram = null;
     let walkingToStationInfo = null;
-    let walkingToStationInfo = null;
     try {
       if (!startStation || !endStation) {
         setIsSimulating(false);
@@ -1228,21 +1172,7 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
 
       // If startStation is a current location (has lat/lng but no id)
       if (startStation.lat && startStation.lng && (startStation.id === 'current' || !startStation.id)) {
-      if (startStation.lat && startStation.lng && (startStation.id === 'current' || !startStation.id)) {
         const allStations = stations;
-        // Find the nearest station (regardless of color)
-        let nearestStation = null;
-        let minDistance = Infinity;
-        for (const station of allStations) {
-          const distance = google.maps.geometry.spherical.computeDistanceBetween(
-            { lat: startStation.lat, lng: startStation.lng },
-            { lat: station.lat, lng: station.lng }
-          );
-          if (distance < minDistance) {
-            minDistance = distance;
-            nearestStation = station;
-          }
-        }
         // Find the nearest station (regardless of color)
         let nearestStation = null;
         let minDistance = Infinity;
@@ -1258,115 +1188,9 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
         }
         if (!nearestStation) {
           alert('No tram stations found.');
-          alert('No tram stations found.');
           return;
         }
 
-        let walkingResult = null;
-        // --- Caching logic ---
-        const cacheKey = `${startStation.lat},${startStation.lng}|${nearestStation.lat},${nearestStation.lng}`;
-        if (walkingDirectionsCache.has(cacheKey)) {
-          walkingResult = walkingDirectionsCache.get(cacheKey);
-          console.log('Using cached walking directions result for', cacheKey);
-        } else {
-          try {
-            console.log('Loading Directions API...');
-            const { DirectionsService } = await google.maps.importLibrary("routes");
-            console.log('Directions API loaded successfully');
-            
-            const directionsService = new DirectionsService();
-            console.log('DirectionsService instance created');
-            
-            console.log('Requesting walking directions from:', {
-              origin: { lat: startStation.lat, lng: startStation.lng },
-              destination: { lat: nearestStation.lat, lng: nearestStation.lng }
-            });
-
-            walkingResult = await new Promise((resolve, reject) => {
-              directionsService.route(
-                {
-                  origin: { lat: startStation.lat, lng: startStation.lng },
-                  destination: { lat: nearestStation.lat, lng: nearestStation.lng },
-                  travelMode: google.maps.TravelMode.WALKING,
-                },
-                (result, status) => {
-                  console.log('Directions API response:', { status, result });
-                  if (status === "OK") {
-                    resolve(result);
-                  } else {
-                    console.error('Directions API error:', status);
-                    resolve(null);
-                  }
-                }
-              );
-            });
-            // Store in cache
-            walkingDirectionsCache.set(cacheKey, walkingResult);
-          } catch (error) {
-            console.error('Error creating walking route:', error);
-            // Fallback to straight line if Directions API fails
-            if (mapInstanceRef.current) {
-              let walkingPolyline = new google.maps.Polyline({
-                path: [
-                  { lat: startStation.lat, lng: startStation.lng },
-                  { lat: nearestStation.lat, lng: nearestStation.lng }
-                ],
-                strokeColor: '#FF9800',
-                strokeOpacity: 0.8,
-                strokeWeight: 3,
-                map: mapInstanceRef.current
-              });
-              polylinesRef.current.push(walkingPolyline);
-            }
-          }
-        }
-        // --- Drawing polyline (no redeclaration) ---
-        let walkingPolyline;
-        if (walkingResult && walkingResult.routes && walkingResult.routes[0] && walkingResult.routes[0].overview_path) {
-          console.log('Drawing walking path with Directions API result');
-          const overviewPath = walkingResult.routes[0].overview_path.map(latlng => ({ lat: latlng.lat(), lng: latlng.lng() }));
-          console.log('Overview path points:', overviewPath.length);
-          if (!mapInstanceRef.current) {
-            console.error('Map instance is not available');
-            return;
-          }
-          walkingPolyline = new google.maps.Polyline({
-            path: overviewPath,
-            strokeColor: '#FF9800',
-            strokeOpacity: 0.8,
-            strokeWeight: 3,
-            icons: [{
-              icon: {
-                path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
-                scale: 3,
-                strokeColor: '#FF9800'
-              },
-              offset: '20%',
-              repeat: '150px'
-            }],
-            map: mapInstanceRef.current
-          });
-          console.log('Created walking polyline:', walkingPolyline);
-          polylinesRef.current.push(walkingPolyline);
-        } else {
-          console.log('No valid walking path found, using straight line fallback');
-          if (!mapInstanceRef.current) {
-            console.error('Map instance is not available');
-            return;
-          }
-          walkingPolyline = new google.maps.Polyline({
-            path: [
-              { lat: startStation.lat, lng: startStation.lng },
-              { lat: nearestStation.lat, lng: nearestStation.lng }
-            ],
-            strokeColor: '#FF9800',
-            strokeOpacity: 0.8,
-            strokeWeight: 3,
-            map: mapInstanceRef.current
-          });
-          console.log('Created straight line polyline:', walkingPolyline);
-          polylinesRef.current.push(walkingPolyline);
-        }
         let walkingResult = null;
         // --- Caching logic ---
         const cacheKey = `${startStation.lat},${startStation.lng}|${nearestStation.lat},${nearestStation.lng}`;
@@ -1482,13 +1306,6 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
         } : null;
         onRouteInfoUpdate({ walkingToStation: walkingToStationInfo });
         // Continue with the route from nearest station to destination (including transfer logic)
-        walkingToStationInfo = walkingResult ? {
-          color: 'walking',
-          distance: walkingResult.routes[0].legs[0].distance.text,
-          duration: walkingResult.routes[0].legs[0].duration.text
-        } : null;
-        onRouteInfoUpdate({ walkingToStation: walkingToStationInfo });
-        // Continue with the route from nearest station to destination (including transfer logic)
         startStation = nearestStation;
       }
 
@@ -1551,20 +1368,6 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
             }
             continue;
           }
-          // --- Caching logic for tram route info ---
-          const tramCacheKey = `${startStation.id}|${endStation.id}|${color}`;
-          let cachedTramInfo = tramRouteInfoCache.get(tramCacheKey);
-          if (cachedTramInfo) {
-            // Use cached info
-            if (cachedTramInfo.totalDuration < bestTotalDuration) {
-              bestTotalDuration = cachedTramInfo.totalDuration;
-              selectedColor = color;
-              finalNearestTram = cachedTramInfo.nearestTram;
-              bestTramToStartDistance = cachedTramInfo.tramToStartDistance;
-              bestTramToStartDuration = cachedTramInfo.tramToStartDuration;
-            }
-            continue;
-          }
           // Find nearest tram of this color
           const nearestTram = await findNearestTram(startStation, [color]);
           if (!nearestTram) continue;
@@ -1586,14 +1389,6 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
           const startToEndDuration = await calculateRouteDuration(startStation, endStation);
           // Calculate total duration in minutes
           const totalDuration = tramToStartDurationMinutes + parseDurationToMinutes(startToEndDuration);
-
-          // Store in cache
-          tramRouteInfoCache.set(tramCacheKey, {
-            totalDuration,
-            nearestTram,
-            tramToStartDistance,
-            tramToStartDuration
-          });
 
           // Store in cache
           tramRouteInfoCache.set(tramCacheKey, {
@@ -1806,118 +1601,7 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
         // --- Caching logic for transfer route info ---
         const transferCacheKey = `${startStation.id}|${transferStation.id}|${endStation.id}|${firstLeg.color}|${secondLeg.color}`;
         let cachedTransferInfo = transferRouteInfoCache.get(transferCacheKey);
-        // --- Caching logic for transfer route info ---
-        const transferCacheKey = `${startStation.id}|${transferStation.id}|${endStation.id}|${firstLeg.color}|${secondLeg.color}`;
-        let cachedTransferInfo = transferRouteInfoCache.get(transferCacheKey);
         let tramToStartDurationMinutes = 0;
-        let startToTransferDistanceKm = 0;
-        let startToTransferDurationMinutes = 0;
-        let tramToTransferDurationMinutes = 0;
-        let tramToTransferDistanceKm = 0;
-        let transferToEndDistanceKm = 0;
-        let transferToEndDurationMinutes = 0;
-        let tramArrivalTimeMins = 0;
-        let tramArrivalDistance = undefined;
-        if (cachedTransferInfo) {
-          ({
-            tramToStartDurationMinutes,
-            startToTransferDistanceKm,
-            startToTransferDurationMinutes,
-            tramToTransferDurationMinutes,
-            tramToTransferDistanceKm,
-            transferToEndDistanceKm,
-            transferToEndDurationMinutes,
-            tramArrivalTimeMins,
-            tramArrivalDistance
-          } = cachedTransferInfo);
-        } else {
-          if (firstLeg.mode === 'tram') {
-            const firstTram = tramPositions.find(tram => tram.color === firstLeg.color);
-            if (firstTram) {
-              const firstLegGeographicRoute = adminRoutes[firstLeg.color.toLowerCase()];
-              const distanceAlongRoute = await calculateDistanceAlongRoute(
-                firstLegGeographicRoute,
-                { lat: firstTram.lat, lng: firstTram.lng },
-                { lat: startStation.lat, lng: startStation.lng }
-              );
-              tramToStartDurationMinutes = Math.round((distanceAlongRoute / tramSpeed) * 60);
-            }
-          } else if (firstLeg.mode === 'walk') {
-            tramToStartDurationMinutes = 0;
-          }
-          if (firstLeg.mode === 'tram') {
-            startToTransferDistanceKm = await calculateDistanceAlongRoute(
-              adminRoutes[firstLeg.color.toLowerCase()],
-              { lat: startStation.lat, lng: startStation.lng },
-              { lat: transferStation.lat, lng: transferStation.lng }
-            );
-            startToTransferDurationMinutes = Math.round((startToTransferDistanceKm / tramSpeed) * 60);
-          } else if (firstLeg.mode === 'walk' && walkingPolyline) {
-            startToTransferDistanceKm = walkingPolyline.distanceKm;
-            startToTransferDurationMinutes = walkingPolyline.durationMinutes;
-          }
-          const secondTram = tramPositions.find(tram => tram.color === secondLeg.color);
-          if (secondTram) {
-            const secondLegGeographicRoute = adminRoutes[secondLeg.color.toLowerCase()];
-            let distanceForward = 0;
-            let idxF = await findClosestPointIndex(secondLegGeographicRoute, { lat: secondTram.lat, lng: secondTram.lng });
-            let transferIdx = await findClosestPointIndex(secondLegGeographicRoute, { lat: transferStation.lat, lng: transferStation.lng });
-            let stepsF = 0;
-            while (idxF !== transferIdx && stepsF < secondLegGeographicRoute.length) {
-              const nextIdx = (idxF + 1) % secondLegGeographicRoute.length;
-              distanceForward += google.maps.geometry.spherical.computeDistanceBetween(
-                secondLegGeographicRoute[idxF],
-                secondLegGeographicRoute[nextIdx]
-              );
-              idxF = nextIdx;
-              stepsF++;
-            }
-            let distanceBackward = 0;
-            let idxB = await findClosestPointIndex(secondLegGeographicRoute, { lat: secondTram.lat, lng: secondTram.lng });
-            let stepsB = 0;
-            while (idxB !== transferIdx && stepsB < secondLegGeographicRoute.length) {
-              const prevIdx = (idxB - 1 + secondLegGeographicRoute.length) % secondLegGeographicRoute.length;
-              distanceBackward += google.maps.geometry.spherical.computeDistanceBetween(
-                secondLegGeographicRoute[idxB],
-                secondLegGeographicRoute[prevIdx]
-              );
-              idxB = prevIdx;
-              stepsB++;
-            }
-            tramToTransferDistanceKm = Math.min(distanceForward, distanceBackward) / 1000;
-            tramToTransferDurationMinutes = Math.round((tramToTransferDistanceKm / tramSpeed) * 60);
-          }
-          transferToEndDistanceKm = await calculateDistanceAlongRoute(
-            adminRoutes[secondLeg.color.toLowerCase()],
-            { lat: transferStation.lat, lng: transferStation.lng },
-            { lat: endStation.lat, lng: endStation.lng }
-          );
-          transferToEndDurationMinutes = Math.round((transferToEndDistanceKm / tramSpeed) * 60);
-          if (firstLeg.mode === 'walk') {
-            const transferTram = await findNearestTram(transferStation, [secondLeg.color]);
-            if (transferTram) {
-              const tramRoute = adminRoutes[secondLeg.color.toLowerCase()];
-              tramArrivalDistance = await calculateDistanceAlongRoute(
-                tramRoute,
-                { lat: transferTram.lat, lng: transferTram.lng },
-                { lat: transferStation.lat, lng: transferStation.lng }
-              );
-              tramArrivalTimeMins = Math.round((tramArrivalDistance / tramSpeed) * 60);
-            }
-          }
-          // Store in cache
-          transferRouteInfoCache.set(transferCacheKey, {
-            tramToStartDurationMinutes,
-            startToTransferDistanceKm,
-            startToTransferDurationMinutes,
-            tramToTransferDurationMinutes,
-            tramToTransferDistanceKm,
-            transferToEndDistanceKm,
-            transferToEndDurationMinutes,
-            tramArrivalTimeMins,
-            tramArrivalDistance
-          });
-        }
         let startToTransferDistanceKm = 0;
         let startToTransferDurationMinutes = 0;
         let tramToTransferDurationMinutes = 0;
@@ -2373,100 +2057,6 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
         alert(`Transfer required at ${transferStation.nameEn}. Please wait for a tram with colors: ${secondLegColor}`);
         return;
       }
-      if (typeof selectedColor !== 'undefined') {
-        // For direct route:
-        // Calculate total distance and duration including walkingToStation if present
-        let totalDistanceValue = parseFloat(startToEndDistance);
-        let totalMins = parseDurationToMinutes(tramToStartDuration) + startToEndDurationMinutes;
-        if (walkingToStationInfo && walkingToStationInfo.distance && walkingToStationInfo.duration) {
-          // Add walking distance and duration
-          const walkDist = parseFloat(walkingToStationInfo.distance);
-          const walkMins = parseDurationToMinutes(walkingToStationInfo.duration);
-          if (!isNaN(walkDist)) totalDistanceValue += walkDist;
-          if (!isNaN(walkMins)) totalMins += walkMins;
-        }
-        onRouteInfoUpdate({
-          ...(walkingToStationInfo ? { walkingToStation: walkingToStationInfo } : {}),
-          tramToStart: {
-            color: selectedColor,
-            distance: tramToStartDistance,
-            duration: tramToStartDuration
-          },
-          startToEnd: {
-            color: selectedColor,
-            distance: startToEndDistance,
-            duration: startToEndDuration
-          },
-          total: {
-            label: 'Origin to Destination',
-            distance: totalDistanceValue.toFixed(2) + ' km',
-            duration: totalMins + ' mins'
-          }
-        });
-        return;
-      } else {
-        // For transfer/complex route:
-        // Calculate total distance and duration including walkingToStation if present
-        let totalDistanceValue = (parseFloat(startToTransferDistance) + parseFloat(transferToEndDistance));
-        let totalMins = 0;
-        if (firstLeg.mode === 'walk') {
-          totalMins =
-            (walkingPolyline?.durationMinutes || 0) + // walking
-            tramArrivalTimeMins + // waiting for tram
-            transferToEndDurationMinutes; // tram ride
-        } else {
-          totalMins =
-            parseDurationToMinutes(tramToStartDuration) + // Time for the first tram to reach the origin station
-            parseDurationToMinutes(startToTransferDuration) + // Time from origin to transfer station
-            parseDurationToMinutes(tramToTransferDuration) + // Time for the second tram to reach the transfer station
-            transferToEndDurationMinutes; // Time from transfer station to destination
-        }
-        if (walkingToStationInfo && walkingToStationInfo.distance && walkingToStationInfo.duration) {
-          const walkDist = parseFloat(walkingToStationInfo.distance);
-          const walkMins = parseDurationToMinutes(walkingToStationInfo.duration);
-          if (!isNaN(walkDist)) totalDistanceValue += walkDist;
-          if (!isNaN(walkMins)) totalMins += walkMins;
-        }
-        onRouteInfoUpdate({
-          ...(walkingToStationInfo ? { walkingToStation: walkingToStationInfo } : {}),
-          tramToStart: firstLeg.mode === 'tram' ? {
-            color: firstLegColor,
-            distance: tramToStartDistance,
-            duration: tramToStartDuration,
-            label: firstLegColor.charAt(0).toUpperCase() + firstLegColor.slice(1) + ' Tram to Origin Station'
-          } : undefined,
-          startToTransfer: {
-            color: firstLegColorLabel,
-            label: firstLegLabel,
-            distance: firstLegDistance,
-            duration: firstLegDuration
-          },
-          tramToTransfer: firstLeg.mode === 'walk' ? {
-            color: secondLegColor,
-            distance: tramToTransferDistanceStr,
-            duration: tramArrivalTimeStr,
-            label: secondLegColor.charAt(0).toUpperCase() + secondLegColor.slice(1) + ' Tram to Transfer Station'
-          } : {
-            color: secondLegColor,
-            distance: tramToTransferDistanceKm.toFixed(2) + ' km',
-            duration: formatDurationFromMinutes(tramToTransferDurationMinutes),
-            label: secondLegColor.charAt(0).toUpperCase() + secondLegColor.slice(1) + ' Tram to Transfer Station'
-          },
-          transferToEnd: {
-            color: secondLegColor,
-            distance: transferToEndDistance,
-            duration: formatDurationFromMinutes(transferToEndDurationMinutes)
-          },
-          transferStation: transferStation.nameEn,
-          total: {
-            label: totalLabel,
-            distance: totalDistanceValue.toFixed(2) + ' km',
-            duration: formatDurationFromMinutes(totalMins)
-          }
-        });
-        alert(`Transfer required at ${transferStation.nameEn}. Please wait for a tram with colors: ${secondLegColor}`);
-        return;
-      }
 
     } catch (error) {
       setIsSimulating(false);
@@ -2635,13 +2225,6 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
       routeDebounceTimer.current = setTimeout(() => {
         displayRoute(origin.station || origin, destination);
       }, 500); // 500ms debounce
-      // Debounce route calculation
-      if (routeDebounceTimer.current) {
-        clearTimeout(routeDebounceTimer.current);
-      }
-      routeDebounceTimer.current = setTimeout(() => {
-        displayRoute(origin.station || origin, destination);
-      }, 500); // 500ms debounce
     }
   }, [origin, destination, isMapLoaded]);
 
@@ -2779,11 +2362,6 @@ const MapComponent = ({ origin, destination, onRouteInfoUpdate }) => {
 
   return (
     <div className="map-section">
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-        <button onClick={getCurrentLocation} style={{ padding: '6px 12px', borderRadius: 4, background: '#2196F3', color: 'white', border: 'none', cursor: 'pointer' }}>
-          Refresh Location
-        </button>
-      </div>
       <div className="category-filters" style={{
         position: 'absolute',
         top: '10px',
